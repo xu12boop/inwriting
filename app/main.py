@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import models
 from app.core.config import settings
 from app.db.database import Base, engine
-from app.api.routers import auth  # 引入刚才写的路由
+from app.api.routers import auth, resume # 引入刚才写的路由
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,7 +25,14 @@ app.add_middleware(
 
 # 挂载路由
 app.include_router(auth.router)
+app.include_router(resume.router)
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "inwriting-api"}
+from fastapi.responses import RedirectResponse
+
+@app.get("/", include_in_schema=False)
+def root():
+    # 访问根路径时，自动重定向到 API 文档
+    return RedirectResponse(url="/docs")
