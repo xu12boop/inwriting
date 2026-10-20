@@ -36,3 +36,9 @@ from fastapi.responses import RedirectResponse
 def root():
     # 访问根路径时，自动重定向到 API 文档
     return RedirectResponse(url="/docs")
+# ...
+from app.api.routers import auth, resume, interview, report # 加上 interview
+app.include_router(report.router)
+app.include_router(auth.router)
+app.include_router(resume.router)
+app.include_router(interview.router) # 加上这行
