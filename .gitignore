@@ -1,18 +1,23 @@
-.env
-.env.*
-!.env.example
-
+# 忽略 Python 虚拟环境
 venv/
 .venv/
 __pycache__/
 *.py[cod]
+
+# 忽略环境变量（千万别把 Key 传上去！）
+.env
+.env.*
+!.env.example
+
+# 忽略数据库和向量库
 *.db
 *.sqlite3
+.chroma/
 
-.idea/
-.vscode/
-.DS_Store
+# 忽略前端依赖和构建产物
 node_modules/
 dist/
+.vscode/
+.idea/
+.DS_Store
 *.log
-.chroma/

@@ -11,16 +11,12 @@ from app.models.user import User
 from app.schemas.interview import InterviewStartRequest, ChatRequest, InterviewResponse
 from app.core.llm import get_llm_stream
 from app.api.deps import get_current_user
-from app.core.rag import search_jd
 
 router = APIRouter(prefix="/interview", tags=["模拟面试"])
 
 INTERVIEWER_PROMPT = """
 你是一位大厂资深面试官。候选人简历信息：
 {resume_json}
-
-该岗位的核心 JD 要求（请结合这些要求提问）：
-{jd_text}
 
 要求：
 1. 提问专业有深度，结合项目经历深挖。
@@ -39,7 +35,7 @@ def start_interview(
         raise HTTPException(status_code=404, detail="未找到该简历")
 
     new_interview = Interview(
-        user_id=current_user.id, # ✅ 真实用户
+        user_id=current_user.id,
         resume_id=req.resume_id,
         chat_history=[],
         status="ongoing"
@@ -51,7 +47,7 @@ def start_interview(
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest):
+def chat(req: ChatRequest):  # 👈 注意：这里去掉了 async
     db = SessionLocal()
     try:
         interview = db.query(Interview).filter(Interview.id == req.interview_id).first()
@@ -62,40 +58,44 @@ async def chat(req: ChatRequest):
         chat_history = interview.chat_history or []
         chat_history.append({"role": "user", "content": req.user_message})
 
-        # 🚨 RAG 检索：去 Chroma 库里查这个岗位的 JD
-        jd_text = search_jd(resume.target_job) if resume else "暂无 JD 信息"
-
         system_msg = {
             "role": "system", 
             "content": INTERVIEWER_PROMPT.format(
-                resume_json=json.dumps(resume.parsed_json, ensure_ascii=False) if resume else "暂无",
-                jd_text=jd_text
+                resume_json=json.dumps(resume.parsed_json, ensure_ascii=False) if resume else "暂无"
             )
         }
         messages = [system_msg] + chat_history
 
+        # 👈 这里也去掉了 async，变成普通的同步生成器
         def sse_generator():
             full_response = ""
+            
             for chunk in get_llm_stream(messages):
                 full_response += chunk
                 yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                time.sleep(0.05) # 放心大胆地用 time.sleep，不会卡死服务器了
             
-            # 兜底
             if not full_response.strip():
-                mock_question = "我看你简历里写了 FastAPI，结合我们这个岗位的 JD 要求，能说说你是如何实现接口鉴权和 RAG 检索的吗？"
+                print("⚠️ 大模型未返回内容，触发 Mock 兜底...")
+                mock_question = "你好，我是今天的面试官。我看你简历上写了熟悉 FastAPI，能简单说说你是如何处理高并发场景的流式响应的吗？"
                 for char in mock_question:
-                    time.sleep(0.05)
                     full_response += char
                     yield f"data: {json.dumps({'content': char}, ensure_ascii=False)}\n\n"
+                    time.sleep(0.05)
 
             chat_history.append({"role": "assistant", "content": full_response})
             interview.chat_history = chat_history
             db.add(interview)
             db.commit()
             db.close()
+            
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(sse_generator(), media_type="text/event-stream")
+        headers = {
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache"
+        }
+        return StreamingResponse(sse_generator(), media_type="text/event-stream", headers=headers)
 
     except Exception as e:
         db.close()
