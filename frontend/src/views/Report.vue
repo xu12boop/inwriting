@@ -1,51 +1,53 @@
 <template>
-  <div class="report-container">
-    <header class="header">
-      <h2>📊 面试能力评估报告</h2>
-      <el-button type="primary" plain @click="router.push('/home')"
+  <div class="report-wrapper">
+    <div class="bg-glow"></div>
+
+    <header class="glass-header">
+      <h2 class="logo-text">📊 面试能力评估报告</h2>
+      <el-button type="primary" plain round @click="router.push('/home')"
         >返回工作台</el-button
       >
     </header>
 
     <div v-if="loading" class="loading-box">
       <el-icon class="is-loading"><Loading /></el-icon>
-      <p>正在拼命读取 AI 评估数据...</p>
+      <p>AI 正在复盘面试表现...</p>
     </div>
 
-    <!-- 注意这里用了 v-show，保证 DOM 一定会存在 -->
     <div v-show="!loading && reportData" class="main-content">
-      <!-- 左侧：雷达图 -->
-      <el-card class="chart-card">
-        <h3>核心能力画像</h3>
-        <!-- 强制写死宽高，防止被 flex 挤压成 0 -->
-        <div ref="radarChartRef" style="width: 100%; height: 400px"></div>
+      <!-- 左侧雷达图 -->
+      <div class="glass-card chart-card">
+        <h3 class="section-title">核心能力雷达</h3>
+        <div ref="radarChartRef" class="echarts-container"></div>
 
-        <div class="score-box">
-          <p>
-            综合得分：<span class="score">{{ reportData?.overall_score }}</span>
-            分
-          </p>
+        <div class="total-score">
+          <span class="label">综合得分</span>
+          <span class="num">{{ reportData?.overall_score }}</span>
         </div>
-      </el-card>
+      </div>
 
-      <!-- 右侧：AI 总结与学习计划 (生成式 UI) -->
-      <el-card class="plan-card">
-        <h3>面试官评语</h3>
-        <p class="summary">{{ reportData?.summary }}</p>
+      <!-- 右侧评语与任务 -->
+      <div class="right-panel">
+        <div class="glass-card summary-card">
+          <h3 class="section-title">📝 面试官评语</h3>
+          <div class="summary-content">{{ reportData?.summary }}</div>
+        </div>
 
-        <h3 style="margin-top: 30px">📚 AI 推荐学习路线</h3>
-        <el-checkbox-group v-model="completedTasks">
-          <div
-            v-for="(item, index) in reportData?.learning_plan"
-            :key="index"
-            class="task-item"
-          >
-            <el-checkbox :label="item.task" border>
-              {{ item.task }}
-            </el-checkbox>
-          </div>
-        </el-checkbox-group>
-      </el-card>
+        <div class="glass-card plan-card">
+          <h3 class="section-title">🚀 AI 推荐学习路线</h3>
+          <el-checkbox-group v-model="completedTasks" class="task-list">
+            <div
+              v-for="(item, index) in reportData?.learning_plan"
+              :key="index"
+              class="task-item-wrapper"
+            >
+              <el-checkbox :label="item.task" class="custom-checkbox">
+                <span class="task-text">{{ item.task }}</span>
+              </el-checkbox>
+            </div>
+          </el-checkbox-group>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -69,23 +71,18 @@ let chartInstance = null;
 
 onMounted(async () => {
   const interviewId = route.query.id;
-  if (!interviewId) {
-    ElMessage.error("参数错误");
-    return router.push("/home");
-  }
+  if (!interviewId) return router.push("/home");
 
   try {
     const res = await request.post(`/report/generate/${interviewId}`);
     reportData.value = res;
   } catch (error) {
-    console.error("获取报告失败", error);
     ElMessage.error("获取报告失败");
   } finally {
     loading.value = false;
   }
 });
 
-// 🚨 核心修复：监听 reportData 的变化。数据一变，等 DOM 渲染完就立刻画图
 watch(
   reportData,
   async (newData) => {
@@ -98,15 +95,8 @@ watch(
 );
 
 const initChart = () => {
-  if (!radarChartRef.value || !reportData.value) {
-    console.warn("雷达图容器未准备好");
-    return;
-  }
-
-  if (chartInstance) {
-    chartInstance.dispose(); // 销毁旧实例，防止热更新冲突
-  }
-
+  if (!radarChartRef.value || !reportData.value) return;
+  if (chartInstance) chartInstance.dispose();
   chartInstance = echarts.init(radarChartRef.value);
 
   const data = reportData.value.radar_data || {};
@@ -114,15 +104,16 @@ const initChart = () => {
   const values = Object.values(data);
 
   const option = {
-    tooltip: {},
     radar: {
       indicator: indicators,
-      axisName: { color: "#38bdf8", fontSize: 14 },
+      axisName: { color: "#94a3b8", fontSize: 14 },
+      splitLine: { lineStyle: { color: "rgba(255,255,255,0.1)" } },
       splitArea: {
         areaStyle: {
-          color: ["rgba(56, 189, 248, 0.05)", "rgba(56, 189, 248, 0.1)"],
+          color: ["rgba(56, 189, 248, 0.02)", "rgba(56, 189, 248, 0.05)"],
         },
       },
+      axisLine: { lineStyle: { color: "rgba(255,255,255,0.1)" } },
     },
     series: [
       {
@@ -133,7 +124,13 @@ const initChart = () => {
             value: values,
             name: "候选人",
             itemStyle: { color: "#38bdf8" },
-            areaStyle: { color: "rgba(56, 189, 248, 0.4)" },
+            lineStyle: { width: 2, shadowColor: "#38bdf8", shadowBlur: 10 },
+            areaStyle: {
+              color: new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
+                { offset: 0, color: "rgba(56, 189, 248, 0.6)" },
+                { offset: 1, color: "rgba(56, 189, 248, 0.1)" },
+              ]),
+            },
           },
         ],
       },
@@ -141,31 +138,49 @@ const initChart = () => {
   };
   chartInstance.setOption(option);
 };
-
-// 窗口缩放时自适应
-window.addEventListener("resize", () => {
-  if (chartInstance) chartInstance.resize();
-});
 </script>
 
 <style scoped>
-.report-container {
+.report-wrapper {
   min-height: 100vh;
-  background: #0f172a;
+  background-color: #0b1120;
+  position: relative;
+  display: flex;
+  flex-direction: column;
 }
-.header {
+.bg-glow {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(
+    circle,
+    rgba(56, 189, 248, 0.1) 0%,
+    transparent 60%
+  );
+  bottom: -100px;
+  left: -100px;
+  z-index: 0;
+}
+
+.glass-header {
+  position: relative;
+  z-index: 10;
+  height: 70px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 30px;
-  height: 60px;
-  background: rgba(30, 41, 59, 0.8);
-  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+  padding: 0 40px;
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
-.header h2 {
+.logo-text {
   margin: 0;
-  color: #38bdf8;
+  color: #f8fafc;
+  font-size: 20px;
+  font-weight: bold;
 }
+
 .loading-box {
   display: flex;
   flex-direction: column;
@@ -173,58 +188,143 @@ window.addEventListener("resize", () => {
   justify-content: center;
   height: 60vh;
   color: #38bdf8;
-  font-size: 20px;
+  font-size: 18px;
+  z-index: 1;
+}
+.loading-box .el-icon {
+  font-size: 40px;
+  margin-bottom: 20px;
 }
 
 .main-content {
+  position: relative;
+  z-index: 1;
   display: flex;
+  padding: 40px;
+  gap: 40px;
+  flex: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.glass-card {
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
   padding: 30px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+.section-title {
+  color: #f1f5f9;
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 18px;
+  border-left: 4px solid #38bdf8;
+  padding-left: 12px;
+}
+
+/* 左侧雷达图区域 */
+.chart-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.echarts-container {
+  width: 100%;
+  height: 400px;
+  flex: 1;
+}
+.total-score {
+  margin-top: 20px;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 10px;
+}
+.total-score .label {
+  color: #94a3b8;
+  font-size: 16px;
+}
+.total-score .num {
+  font-size: 50px;
+  font-weight: 900;
+  color: #10b981;
+  line-height: 1;
+  text-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+}
+
+/* 右侧内容区 */
+.right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 30px;
 }
-.chart-card,
+.summary-card {
+  flex: 1;
+}
+.summary-content {
+  color: #cbd5e1;
+  line-height: 1.8;
+  font-size: 15px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* 任务列表 */
 .plan-card {
   flex: 1;
-  background: rgba(30, 41, 59, 0.6) !important;
-  border: 1px solid rgba(56, 189, 248, 0.2) !important;
-  color: #e2e8f0;
+  overflow-y: auto;
 }
-h3 {
-  color: #38bdf8;
-  margin-top: 0;
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  width: 100%;
 }
-
-.score-box {
-  text-align: center;
-  font-size: 18px;
-  margin-top: 10px;
+.task-item-wrapper {
+  width: 100%;
 }
-.score {
-  font-size: 36px;
-  color: #10b981;
-  font-weight: bold;
-}
-
-.summary {
-  line-height: 1.8;
-  color: #cbd5e1;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 15px;
-  border-radius: 8px;
-}
-
-.task-item {
-  margin-bottom: 15px;
-}
-:deep(.el-checkbox.is-bordered) {
+.custom-checkbox {
   width: 100%;
   height: auto;
-  padding: 15px;
-  white-space: normal;
-  background: rgba(255, 255, 255, 0.05);
+  padding: 16px 20px;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s;
+}
+.custom-checkbox:hover {
+  background: rgba(56, 189, 248, 0.1);
   border-color: rgba(56, 189, 248, 0.3);
 }
-:deep(.el-checkbox__label) {
-  color: #e2e8f0 !important;
+.task-text {
+  color: #e2e8f0;
+  white-space: normal;
   line-height: 1.5;
+  font-size: 14px;
+  margin-left: 10px;
+}
+
+:deep(.el-checkbox__inner) {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+:deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: #38bdf8;
+  border-color: #38bdf8;
+}
+:deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+  color: #64748b !important;
+  text-decoration: line-through;
 }
 </style>
