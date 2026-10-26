@@ -69,3 +69,12 @@ cp .env.example .env
 # 启动服务 (运行在 8001 端口)
 python -m uvicorn app.main:app --reload --port 8001
 ```
+## 👥 团队信息
+*   **参赛团队**：在写了在写了
+*   **参赛赛事**：全国高校 AI Web 网页开发挑战赛 
+*   **团队分工**：
+    *   [徐思博]：全栈开发 / AI 架构设计 / 提示词工程
+    *   [郝继凯，弓瑞]：前端 UI/UX 设计 / 产品 PRD
+
+---
+*Built with ❤ for the AI Web Challenge.*
