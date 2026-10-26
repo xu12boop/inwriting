@@ -42,3 +42,9 @@ app.include_router(report.router)
 app.include_router(auth.router)
 app.include_router(resume.router)
 app.include_router(interview.router) # 加上这行
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
