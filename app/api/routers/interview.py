@@ -3,6 +3,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.database import get_db, SessionLocal
 from app.models.interview import Interview
@@ -14,8 +15,6 @@ from app.api.deps import get_current_user
 from app.utils.security_filter import check_input_security
 
 router = APIRouter(prefix="/interview", tags=["模拟面试"])
-
-# ================= 三大智能体 Prompt 矩阵 =================
 
 PROMPT_TECH = """
 你是一位大厂资深技术专家。候选人简历信息：{resume_json}
@@ -50,7 +49,7 @@ def start_interview(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    resume = db.query(Resume).filter(Resume.id == req.resume_id).first()
+    resume = db.query(Resume).filter(Resume.id == req.resume_id, Resume.user_id == current_user.id).first()
     if not resume:
         raise HTTPException(status_code=404, detail="未找到该简历")
 
@@ -68,18 +67,30 @@ def start_interview(
 
 
 @router.post("/chat")
-def chat(req: ChatRequest):
+def chat(
+    req: ChatRequest, 
+    current_user: User = Depends(get_current_user) # 🚨 1. 新增：强制校验 JWT 登录
+):
     db = SessionLocal()
     try:
-        interview = db.query(Interview).filter(Interview.id == req.interview_id).first()
+        # 🚨 2. 修复漏洞：不仅要查 ID，还要查这个面试是否属于当前用户！
+        interview = db.query(Interview).filter(
+            Interview.id == req.interview_id,
+            Interview.user_id == current_user.id 
+        ).first()
+        
         if not interview:
-            raise HTTPException(status_code=404, detail="面试记录不存在")
+            raise HTTPException(status_code=404, detail="面试记录不存在或无权访问")
             
         resume = db.query(Resume).filter(Resume.id == interview.resume_id).first()
-        chat_history = interview.chat_history or []
-        chat_history.append({"role": "user", "content": req.user_message})
-
+        chat_history = list(interview.chat_history or [])
+        
         is_safe, warning_msg = check_input_security(req.user_message)
+        
+        chat_history.append({"role": "user", "content": req.user_message})
+        interview.chat_history = chat_history
+        flag_modified(interview, "chat_history")
+        db.commit()
 
         resume_json_str = json.dumps(resume.parsed_json, ensure_ascii=False) if resume else "暂无"
         if interview.interview_type == "hr":
@@ -98,8 +109,10 @@ def chat(req: ChatRequest):
                 for char in warning_msg:
                     yield f"data: {json.dumps({'content': char}, ensure_ascii=False)}\n\n"
                     time.sleep(0.05)
+                
                 chat_history.append({"role": "assistant", "content": warning_msg})
                 interview.chat_history = chat_history
+                flag_modified(interview, "chat_history")
                 db.commit()
                 db.close()
                 yield "data: [DONE]\n\n"
@@ -126,6 +139,7 @@ def chat(req: ChatRequest):
 
             chat_history.append({"role": "assistant", "content": full_response})
             interview.chat_history = chat_history
+            flag_modified(interview, "chat_history")
             db.commit()
             db.close()
             yield "data: [DONE]\n\n"

@@ -104,14 +104,14 @@
         </div>
 
         <div v-else class="result-content fade-in">
-          <!-- 科技感匹配度圆环 -->
+          <!-- 科技感匹配度圆环 (已使用 ?? 严谨判断) -->
           <div class="score-wrapper">
             <div
               class="score-ring"
-              :style="{ '--percent': (resumeData.match_score || 75) + '%' }"
+              :style="{ '--percent': (resumeData.match_score ?? 0) + '%' }"
             >
               <div class="score-inner">
-                <span class="num">{{ resumeData.match_score || 75 }}</span>
+                <span class="num">{{ resumeData.match_score ?? "--" }}</span>
                 <span class="label">Match Score</span>
               </div>
             </div>

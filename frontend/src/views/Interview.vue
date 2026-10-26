@@ -54,9 +54,11 @@
     <!-- 🚨 摄像头监考悬浮窗 -->
     <div class="camera-monitor" v-show="cameraActive">
       <video ref="videoRef" autoplay playsinline muted></video>
-      <div class="camera-status" :class="{ warning: lookingAwayCount > 3 }">
+
+      <!-- 修复：只有当 hasWarning 为 true 时才变红 -->
+      <div class="camera-status" :class="{ warning: hasWarning }">
         <div class="dot"></div>
-        {{ lookingAwayCount > 3 ? "⚠️ 视线异常" : "📷 AI 监考中" }}
+        {{ currentStatus }}
       </div>
     </div>
 
@@ -85,7 +87,6 @@ import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useUserStore } from "../stores/user";
 import request from "../api/request";
-// 🚨 引入 MediaPipe 视觉模型
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 const router = useRouter();
@@ -104,10 +105,14 @@ const chatBoxRef = ref(null);
 const videoRef = ref(null);
 const cameraActive = ref(false);
 const lookingAwayCount = ref(0);
+const currentStatus = ref("初始化中...");
+const hasWarning = ref(false); // 👈 新增：专门控制颜色
+
 let faceLandmarker = null;
 let stream = null;
 let lastVideoTime = -1;
 let animationFrameId = null;
+let lastWarningTime = 0; // 👈 新增：防误报节流阀
 
 const scrollToBottom = async () => {
   await nextTick();
@@ -119,7 +124,6 @@ const scrollToBottom = async () => {
 // ================= 摄像头与视觉推理逻辑 =================
 const initCameraAndAI = async () => {
   try {
-    // 1. 开启摄像头
     stream = await navigator.mediaDevices.getUserMedia({
       video: true,
       audio: false,
@@ -127,29 +131,30 @@ const initCameraAndAI = async () => {
     if (videoRef.value) {
       videoRef.value.srcObject = stream;
       cameraActive.value = true;
+      currentStatus.value = "模型加载中";
     }
 
-    // 2. 加载 MediaPipe 模型 (换成国内极速的 jsdelivr 节点)
     const filesetResolver = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm",
     );
     faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
       baseOptions: {
         modelAssetPath:
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/face_landmarker.task",
+          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", // 换回谷歌官方稳定链接
         delegate: "GPU",
       },
       runningMode: "VIDEO",
       numFaces: 1,
     });
-    console.log("✅ MediaPipe 模型加载成功，开始检测");
-
-    // 3. 开始逐帧检测
+    console.log("✅ MediaPipe 模型加载成功");
+    currentStatus.value = "正常监考中";
+    hasWarning.value = false;
     detectFace();
   } catch (error) {
     console.error("❌ 摄像头或模型加载失败:", error);
-    // 为了不报错，就算没模型也显示摄像头
     if (stream) cameraActive.value = true;
+    currentStatus.value = "模型加载失败";
+    hasWarning.value = true;
   }
 };
 
@@ -161,25 +166,52 @@ const detectFace = () => {
     lastVideoTime = video.currentTime;
     const results = faceLandmarker.detectForVideo(video, performance.now());
 
-    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-      const nose = results.faceLandmarks[0][1];
+    const now = Date.now();
 
-      // 👈 放宽了判断条件：0.35 ~ 0.65 是正常范围，超出就算转头
-      if (nose.x < 0.35 || nose.x > 0.65) {
+    // 情况1：如果没有任何人脸（离开画面）
+    if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
+      currentStatus.value = "❌ 检测不到人脸";
+      hasWarning.value = true;
+
+      // 🚨 节流阀：距离上次报错超过 2 秒才记录一次，防止一秒加几十次
+      if (now - lastWarningTime > 2000) {
         lookingAwayCount.value++;
+        lastWarningTime = now;
         console.log(
-          "⚠️ 检测到视线偏离！当前鼻尖X坐标:",
-          nose.x.toFixed(2),
-          "总次数:",
+          "⚠️ 检测不到人脸，离开画面！总次数:",
           lookingAwayCount.value,
         );
+      }
+    }
+    // 情况2：检测到脸了，但偏了
+    else {
+      const nose = results.faceLandmarks[0][1];
+      const noseX = nose.x;
+
+      // 放宽到 0.2 ~ 0.8，正常坐在电脑前轻微晃动不会报警
+      if (noseX < 0.2 || noseX > 0.8) {
+        currentStatus.value = "⚠️ 视线偏离";
+        hasWarning.value = true;
+        if (now - lastWarningTime > 2000) {
+          lookingAwayCount.value++;
+          lastWarningTime = now;
+          console.log(
+            "⚠️ 视线偏离屏幕！当前鼻尖X:",
+            noseX.toFixed(2),
+            "总次数:",
+            lookingAwayCount.value,
+          );
+        }
+      } else {
+        // 回到中间，恢复正常
+        currentStatus.value = "正常监考中";
+        hasWarning.value = false;
       }
     }
   }
   animationFrameId = requestAnimationFrame(detectFace);
 };
 
-// 组件卸载时关闭摄像头释放资源
 onUnmounted(() => {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   if (stream) {
@@ -194,7 +226,6 @@ const finishInterview = async () => {
   generatingReport.value = true;
   try {
     ElMessage.info("AI 正在复盘面试表现并生成报告...");
-    // 🚨 将视线偏离次数传给后端
     await request.post(
       `/report/generate/${interviewId.value}?look_away=${lookingAwayCount.value}`,
     );
@@ -307,12 +338,12 @@ onMounted(() => {
 
   chatList.value.push({ role: "ai", content: welcome, typing: false });
 
-  // 启动摄像头和 AI 模型
   initCameraAndAI();
 });
 </script>
 
 <style scoped>
+/* 样式保持不变，只要把 hasWarning 绑上去就行 */
 .interview-wrapper {
   height: 100vh;
   display: flex;
@@ -466,42 +497,48 @@ onMounted(() => {
   }
 }
 
-/* 🚨 新增：摄像头监考悬浮窗样式 */
+/* 摄像头监考悬浮窗 */
 .camera-monitor {
   position: absolute;
   bottom: 100px;
   right: 40px;
-  width: 200px;
-  height: 150px;
+  width: 220px;
+  height: 165px;
   border-radius: 12px;
   overflow: hidden;
   border: 2px solid rgba(56, 189, 248, 0.5);
   box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
   z-index: 100;
   background: #000;
+  transition: all 0.3s ease;
+}
+.camera-monitor:has(.warning) {
+  border-color: #ef4444;
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
 }
 .camera-monitor video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* 镜像翻转，像照镜子 */
+  transform: scaleX(-1);
 }
 .camera-status {
   position: absolute;
   bottom: 0;
   left: 0;
   width: 100%;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.7);
   color: #38bdf8;
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   transition: all 0.3s;
 }
 .camera-status.warning {
-  background: rgba(239, 68, 68, 0.8);
+  background: rgba(239, 68, 68, 0.9);
   color: white;
 }
 .dot {

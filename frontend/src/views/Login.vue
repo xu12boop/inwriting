@@ -9,12 +9,36 @@
       <div class="brand-section">
         <div class="logo">智聘引擎 InWriting</div>
         <h1 class="slogan">AI 驱动的<br />全栈模拟面试平台</h1>
-        <p class="features">
-          ⚡ 简历精准解析 · 能力雷达图<br />
-          🤖 多智能体面试 · 压力面/HR面<br />
-          🧠 RAG 知识增强 · 生成式 UI
-        </p>
-        <div class="badge">全国高校 AI Web 开发挑战赛</div>
+
+        <div class="features">
+          <p>⚡ 简历精准解析 · 能力雷达图</p>
+          <p>🤖 多智能体面试 · 压力面/HR面</p>
+          <p>🧠 RAG 知识增强 · 生成式 UI</p>
+        </div>
+
+        <!-- 🚨 新增：实时数据看板 -->
+        <div class="stats-board">
+          <div class="stat-item">
+            <div class="stat-num">3,248</div>
+            <div class="stat-label">累计模拟面试</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-num">12,590</div>
+            <div class="stat-label">生成评估报告</div>
+          </div>
+        </div>
+
+        <!-- 🚨 新增：实时滚动资讯 (替换掉原来的胶囊) -->
+        <div class="live-news">
+          <div class="news-icon">🔊</div>
+          <div class="news-scroll-container">
+            <div class="news-scroll-content">
+              <span>🔥 刚刚，来自北京大学的同学完成了「压力面」极限挑战。</span>
+              <span>📈 平台今日已生成 1,024 份 AI 深度评估报告。</span>
+              <span>🚀 智谱 GLM-4 多智能体引擎运行正常。</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 右侧：表单交互区 -->
@@ -134,14 +158,11 @@ const handleRegister = async () => {
     return ElMessage.warning("请输入账号和密码");
   loading.value = true;
   try {
-    // 1. 先注册
     await axios.post("/api/auth/register", {
       username: form.username,
       password: form.password,
     });
     ElMessage.success("注册成功！正在为您自动登录...");
-
-    // 2. 注册成功后直接走登录逻辑
     await handleLogin();
   } catch (error) {
     if (error.response?.status === 400) {
@@ -168,7 +189,6 @@ const handleRegister = async () => {
   overflow: hidden;
 }
 
-/* 动态网格背景 */
 .bg-grid {
   position: absolute;
   inset: 0;
@@ -179,7 +199,6 @@ const handleRegister = async () => {
   z-index: 1;
 }
 
-/* 背后发光光晕 */
 .bg-glow {
   position: absolute;
   width: 600px;
@@ -196,13 +215,13 @@ const handleRegister = async () => {
   filter: blur(40px);
 }
 
-/* 主卡片：玻璃拟态 */
+/* 主卡片 */
 .login-box {
   position: relative;
   z-index: 10;
   display: flex;
-  width: 900px;
-  height: 500px;
+  width: 950px;
+  height: 560px;
   background: rgba(15, 23, 42, 0.6);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(56, 189, 248, 0.2);
@@ -215,11 +234,11 @@ const handleRegister = async () => {
 
 /* 左侧宣发区 */
 .brand-section {
-  flex: 1;
+  flex: 1.2;
   padding: 50px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   background: linear-gradient(
     135deg,
     rgba(30, 41, 59, 0.8) 0%,
@@ -233,46 +252,124 @@ const handleRegister = async () => {
   font-weight: 900;
   color: #38bdf8;
   letter-spacing: 2px;
-  margin-bottom: 20px;
+  margin-bottom: 25px;
   text-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
 }
 
 .slogan {
-  font-size: 36px;
+  font-size: 38px;
   color: #f8fafc;
   line-height: 1.3;
-  margin: 0 0 20px 0;
+  margin: 0 0 25px 0;
   font-weight: 800;
 }
 
 .features {
   color: #94a3b8;
-  line-height: 2;
-  font-size: 14px;
-  margin-bottom: 40px;
+  line-height: 1.8;
+  font-size: 15px;
+  margin-bottom: 30px;
+}
+.features p {
+  margin: 8px 0;
 }
 
-.badge {
-  display: inline-block;
-  padding: 6px 15px;
-  background: rgba(56, 189, 248, 0.1);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  border-radius: 20px;
+/* 数据看板 */
+.stats-board {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 30px;
+  padding: 15px;
+  background: rgba(56, 189, 248, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.1);
+}
+.stat-item {
+  display: flex;
+  flex-direction: column;
+}
+.stat-num {
+  font-size: 24px;
+  font-weight: bold;
+  color: #10b981;
+  font-family: "Courier New", Courier, monospace;
+}
+.stat-label {
   font-size: 12px;
-  align-self: flex-start;
+  color: #64748b;
+  margin-top: 5px;
+}
+
+/* 滚动资讯 */
+.live-news {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 15px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 20px;
+  overflow: hidden;
+  margin-top: auto; /* 推到底部 */
+}
+.news-icon {
+  font-size: 14px;
+  animation: pulse 1.5s infinite;
+}
+.news-scroll-container {
+  flex: 1;
+  height: 20px;
+  overflow: hidden;
+  position: relative;
+}
+.news-scroll-content {
+  display: flex;
+  flex-direction: column;
+  animation: scrollUp 12s linear infinite; /* 无限向上滚动动画 */
+}
+.news-scroll-content span {
+  height: 20px;
+  line-height: 20px;
+  font-size: 13px;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+@keyframes scrollUp {
+  0% {
+    transform: translateY(0);
+  }
+  33% {
+    transform: translateY(-20px);
+  }
+  66% {
+    transform: translateY(-40px);
+  }
+  100% {
+    transform: translateY(-60px);
+  }
+}
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 /* 右侧表单区 */
 .form-section {
   flex: 1;
-  padding: 50px;
+  padding: 50px 40px;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-/* 覆盖 Element Plus Tabs 样式 */
 :deep(.custom-tabs .el-tabs__nav-wrap::after) {
   display: none;
 }
@@ -293,7 +390,6 @@ const handleRegister = async () => {
 .auth-form {
   margin-top: 30px;
 }
-
 :deep(.el-input__wrapper) {
   background-color: rgba(0, 0, 0, 0.3);
   box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2) inset;
