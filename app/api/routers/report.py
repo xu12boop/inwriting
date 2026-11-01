@@ -123,3 +123,28 @@ def generate_report(
     db.refresh(new_report)
 
     return new_report
+
+
+@router.get("/{interview_id}", response_model=ReportResponse)
+def get_report(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按面试 ID 获取已生成的评估报告；若报告尚未生成则返回 404。
+
+    用于报告页直接读取面试结束时生成的报告（含视线偏离等视觉统计），
+    避免重复调用 /generate 覆盖原有报告。
+    """
+    interview = db.query(Interview).filter(
+        Interview.id == interview_id,
+        Interview.user_id == current_user.id
+    ).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="面试记录不存在或无权访问")
+
+    report = db.query(Report).filter(Report.interview_id == interview_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="报告尚未生成")
+
+    return report

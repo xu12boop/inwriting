@@ -74,7 +74,18 @@ onMounted(async () => {
   if (!interviewId) return router.push("/home");
 
   try {
-    const res = await request.post(`/report/generate/${interviewId}`);
+    let res;
+    try {
+      // 优先读取面试结束时已生成（含视觉统计）的报告，避免重复生成覆盖
+      res = await request.get(`/report/${interviewId}`);
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        // 报告尚未生成（异常路径），兜底触发一次生成
+        res = await request.post(`/report/generate/${interviewId}`);
+      } else {
+        throw e;
+      }
+    }
     reportData.value = res;
   } catch (error) {
     ElMessage.error("获取报告失败");
