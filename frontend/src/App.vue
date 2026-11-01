@@ -2,6 +2,10 @@
   <router-view />
 </template>
 
+<script setup lang="ts">
+// 根组件：仅承载路由视图，不持有业务状态
+</script>
+
 <style>
 body {
   margin: 0;

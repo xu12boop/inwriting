@@ -81,37 +81,38 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useUserStore } from "../stores/user";
 import request from "../api/request";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import type { ChatMessage } from "../types";
 
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 
-const interviewId = ref(null);
-const interviewType = ref("tech");
-const chatList = ref([]);
-const userInput = ref("");
-const isTyping = ref(false);
-const generatingReport = ref(false);
-const chatBoxRef = ref(null);
+const interviewId = ref<string | null>(null);
+const interviewType = ref<string>("tech");
+const chatList = ref<ChatMessage[]>([]);
+const userInput = ref<string>("");
+const isTyping = ref<boolean>(false);
+const generatingReport = ref<boolean>(false);
+const chatBoxRef = ref<HTMLElement | null>(null);
 
 // 摄像头相关变量
-const videoRef = ref(null);
-const cameraActive = ref(false);
-const lookingAwayCount = ref(0);
-const currentStatus = ref("初始化中...");
-const hasWarning = ref(false); // 👈 新增：专门控制颜色
+const videoRef = ref<HTMLVideoElement | null>(null);
+const cameraActive = ref<boolean>(false);
+const lookingAwayCount = ref<number>(0);
+const currentStatus = ref<string>("初始化中...");
+const hasWarning = ref<boolean>(false); // 👈 新增：专门控制颜色
 
-let faceLandmarker = null;
-let stream = null;
+let faceLandmarker: any = null;
+let stream: MediaStream | null = null;
 let lastVideoTime = -1;
-let animationFrameId = null;
+let animationFrameId: number | null = null;
 let lastWarningTime = 0; // 👈 新增：防误报节流阀
 
 const scrollToBottom = async () => {
@@ -250,13 +251,13 @@ const sendMessage = async () => {
   chatList.value.push({ role: "ai", content: "", typing: true });
   const targetIndex = chatList.value.length - 1;
 
-  let textQueue = [];
-  let isFetchFinished = false;
+  let textQueue: string[] = [];
+  let isFetchFinished: boolean = false;
 
   const renderQueue = async () => {
     while (true) {
       if (textQueue.length > 0) {
-        chatList.value[targetIndex].content += textQueue.shift();
+        chatList.value[targetIndex].content += textQueue.shift() ?? "";
         chatList.value = [...chatList.value];
         scrollToBottom();
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -271,7 +272,7 @@ const sendMessage = async () => {
   };
 
   try {
-    const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+    const API_BASE: string = import.meta.env.VITE_API_BASE || "/api";
     const response = await fetch(`${API_BASE}/interview/chat`, {
       method: "POST",
       headers: {
@@ -311,7 +312,7 @@ const sendMessage = async () => {
           }
           try {
             const data = JSON.parse(dataStr);
-            textQueue.push(...data.content.split(""));
+            textQueue.push(...(data.content as string).split(""));
           } catch (e) {}
         }
       }
@@ -325,8 +326,8 @@ const sendMessage = async () => {
 };
 
 onMounted(() => {
-  interviewId.value = route.query.id;
-  interviewType.value = route.query.type || "tech";
+  interviewId.value = (route.query.id as string) ?? null;
+  interviewType.value = (route.query.type as string) || "tech";
   if (!interviewId.value) return router.push("/home");
 
   let welcome = "你好，我是今天的面试官。简历我看过了，准备好开始了吗？";

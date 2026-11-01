@@ -113,7 +113,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { useUserStore } from "../stores/user";
@@ -124,9 +124,9 @@ import { User, Lock } from "@element-plus/icons-vue";
 const router = useRouter();
 const userStore = useUserStore();
 
-const activeTab = ref("login");
-const loading = ref(false);
-const form = reactive({
+const activeTab = ref<string>("login");
+const loading = ref<boolean>(false);
+const form = reactive<{ username: string; password: string }>({
   username: "",
   password: "",
 });

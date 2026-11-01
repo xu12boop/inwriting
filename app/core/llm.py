@@ -85,3 +85,69 @@ def get_llm_stream(messages: list):
     except Exception as e:
         print(f"流式请求异常: {e}")
         yield "抱歉，网络连接出现问题。"
+
+
+def chat_with_tools(messages: list, tools: list, temperature: float = 0.3, max_tool_rounds: int = 2):
+    """
+    带工具（Function Calling / MCP）的非流式调用：用于规划 Agent。
+    若模型返回 tool_calls，则执行工具并把结果回填，最多迭代 max_tool_rounds 轮，
+    最终返回 (assistant_content, tool_calls_log)。
+    tool_calls_log 形如 [{"name": ..., "arguments": ..., "result": ...}, ...]
+    """
+    url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.zhipuai_api_key}",
+        "Content-Type": "application/json"
+    }
+    tool_log = []
+    working_messages = [dict(m) for m in messages]
+
+    for _ in range(max_tool_rounds + 1):
+        payload = {
+            "model": "glm-4-flash",
+            "messages": working_messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": temperature,
+        }
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=(5, 20))
+            if response.status_code == 429:
+                print("⚠️ 规划 Agent 触发限流（429），返回空规划")
+                return "", tool_log
+            if response.status_code != 200:
+                print(f"❌ 规划 Agent 请求失败: {response.status_code} {response.text}")
+                return "", tool_log
+            data = response.json()
+            msg = data["choices"][0]["message"]
+            if msg.get("tool_calls"):
+                from app.core.tools import execute_tool  # 懒加载，避免循环依赖
+                for tc in msg["tool_calls"]:
+                    fn = tc["function"]
+                    name = fn["name"]
+                    try:
+                        args = json.loads(fn.get("arguments", "{}") or "{}")
+                    except Exception:
+                        args = {}
+                    result = execute_tool(name, args)
+                    tool_log.append({"name": name, "arguments": args, "result": result})
+                    working_messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": tc.get("id", name),
+                            "type": "function",
+                            "function": {"name": name, "arguments": fn.get("arguments", "{}")}
+                        }]
+                    })
+                    working_messages.append({
+                        "role": "tool",
+                        "content": str(result),
+                        "tool_call_id": tc.get("id", name)
+                    })
+                continue  # 继续下一轮，让模型基于工具结果给出最终内容
+            return msg.get("content", ""), tool_log
+        except Exception as e:
+            print(f"❌ 规划 Agent 异常: {e}")
+            return "", tool_log
+    return "", tool_log

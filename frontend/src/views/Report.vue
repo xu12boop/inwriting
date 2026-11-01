@@ -52,25 +52,26 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import request from "../api/request";
 import { ElMessage } from "element-plus";
 import { Loading } from "@element-plus/icons-vue";
 import * as echarts from "echarts";
+import type { ReportData, RadarData } from "../types";
 
 const route = useRoute();
 const router = useRouter();
 
-const loading = ref(true);
-const reportData = ref(null);
-const radarChartRef = ref(null);
-const completedTasks = ref([]);
-let chartInstance = null;
+const loading = ref<boolean>(true);
+const reportData = ref<ReportData | null>(null);
+const radarChartRef = ref<HTMLElement | null>(null);
+const completedTasks = ref<string[]>([]);
+let chartInstance: any = null;
 
 onMounted(async () => {
-  const interviewId = route.query.id;
+  const interviewId = (route.query.id as string) ?? null;
   if (!interviewId) return router.push("/home");
 
   try {
@@ -110,7 +111,7 @@ const initChart = () => {
   if (chartInstance) chartInstance.dispose();
   chartInstance = echarts.init(radarChartRef.value);
 
-  const data = reportData.value.radar_data || {};
+  const data: RadarData = reportData.value.radar_data || {};
   const indicators = Object.keys(data).map((key) => ({ name: key, max: 100 }));
   const values = Object.values(data);
 

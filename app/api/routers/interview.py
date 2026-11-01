@@ -11,10 +11,15 @@ from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.interview import InterviewStartRequest, ChatRequest, InterviewResponse
 from app.core.llm import get_llm_stream
+from app.core.planner import plan_next_turn
 from app.api.deps import get_current_user
 from app.utils.security_filter import check_input_security
+from app.core.config import settings
 
 router = APIRouter(prefix="/interview", tags=["模拟面试"])
+
+# 最近一次规划结果缓存（演示/调试用，按面试 ID 存储，不落库，避免改动 DB schema）
+_plan_cache: dict = {}
 
 PROMPT_TECH = """
 你是一位大厂资深技术专家。候选人简历信息：{resume_json}
@@ -100,6 +105,26 @@ def chat(
         else:
             system_content = PROMPT_TECH.format(resume_json=resume_json_str)
 
+        # —— 规划 Agent：在生成提问前，由总控大脑决定策略并检索工具（可解释、可控）——
+        plan = None
+        if settings.enable_planner:
+            try:
+                plan = plan_next_turn(
+                    interview.interview_type,
+                    resume_json_str,
+                    chat_history,
+                )
+                _plan_cache[interview.id] = plan
+                print(f"🧠 规划 Agent：decision={plan['decision']} | reasoning={plan['reasoning']} | tools={[t['name'] for t in plan['tool_calls']]}")
+                if plan.get("focus"):
+                    system_content += (
+                        f"\n\n## 本轮面试官策略（由规划 Agent 生成，请据此聚焦）\n"
+                        f"决策：{plan['decision']}\n聚焦点：{plan['focus']}"
+                    )
+            except Exception as e:
+                print(f"⚠️ 规划 Agent 异常，回退原流程: {e}")
+                plan = None
+
         system_msg = {"role": "system", "content": system_content}
         messages = [system_msg] + chat_history
 
@@ -150,3 +175,15 @@ def chat(
         db.close()
         print(f"报错: {e}")
         raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+@router.get("/plan/{interview_id}")
+def get_last_plan(interview_id: int, current_user: User = Depends(get_current_user)):
+    """返回该面试最近一次规划 Agent 的决策结果（含工具调用与理由），用于演示与可解释性展示。
+
+    数据来源于内存缓存，仅用于评审演示；生产环境可改为落库。
+    """
+    plan = _plan_cache.get(interview_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="暂无规划记录（可能未开启规划 Agent 或尚未对话）")
+    return plan

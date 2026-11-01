@@ -136,29 +136,30 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from "vue";
 import { useUserStore } from "../stores/user";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { UploadFilled } from "@element-plus/icons-vue";
 import request from "../api/request";
+import type { ResumeData } from "../types";
 
 const userStore = useUserStore();
 const router = useRouter();
 
-const targetJob = ref("AI应用开发实习生");
-const file = ref(null);
-const uploading = ref(false);
-const resumeData = ref(null);
-const interviewType = ref("tech");
+const targetJob = ref<string>("AI应用开发实习生");
+const file = ref<File | null>(null);
+const uploading = ref<boolean>(false);
+const resumeData = ref<ResumeData | null>(null);
+const interviewType = ref<string>("tech");
 
-const handleLogout = () => {
+const handleLogout = (): void => {
   userStore.logout();
   router.push("/login");
 };
 
-const handleFileChange = (uploadFile) => {
+const handleFileChange = (uploadFile: any): void => {
   file.value = uploadFile.raw;
 };
 
