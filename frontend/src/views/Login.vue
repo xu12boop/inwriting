@@ -164,7 +164,7 @@ const handleRegister = async () => {
     });
     ElMessage.success("注册成功！正在为您自动登录...");
     await handleLogin();
-  } catch (error) {
+  } catch (error: any) {
     if (error.response?.status === 400) {
       ElMessage.error("该用户名已被注册，请更换");
     } else {

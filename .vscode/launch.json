@@ -2,11 +2,11 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "后端：FastAPI (uvicorn --reload)",
+      "name": "后端：FastAPI (调试，无热重载)",
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["app.main:app", "--reload", "--port", "8001"],
+      "args": ["app.main:app", "--port", "8001"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/venv/Scripts/python.exe",
       "envFile": "${workspaceFolder}/.env",
@@ -41,7 +41,7 @@
     {
       "name": "全栈：后端 + 前端 + 浏览器",
       "configurations": [
-        "后端：FastAPI (uvicorn --reload)",
+        "后端：FastAPI (调试，无热重载)",
         "前端：Vite dev server",
         "前端：Chrome 打开 5173"
       ],

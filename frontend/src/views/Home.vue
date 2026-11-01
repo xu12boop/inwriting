@@ -249,6 +249,7 @@ const startInterview = async () => {
   font-weight: 800;
   letter-spacing: 1px;
   background: linear-gradient(90deg, #38bdf8, #818cf8);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }

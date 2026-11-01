@@ -286,6 +286,7 @@ const sendMessage = async () => {
     });
 
     if (!response.ok) throw new Error("网络请求失败");
+    if (!response.body) throw new Error("浏览器不支持流式响应");
     renderQueue();
 
     const reader = response.body.getReader();
@@ -397,6 +398,7 @@ onMounted(() => {
   font-size: 20px;
   font-weight: bold;
   background: linear-gradient(90deg, #38bdf8, #c084fc);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }

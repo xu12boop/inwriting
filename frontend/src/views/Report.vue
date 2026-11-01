@@ -79,7 +79,7 @@ onMounted(async () => {
     try {
       // 优先读取面试结束时已生成（含视觉统计）的报告，避免重复生成覆盖
       res = await request.get(`/report/${interviewId}`);
-    } catch (e) {
+    } catch (e: any) {
       if (e?.response?.status === 404) {
         // 报告尚未生成（异常路径），兜底触发一次生成
         res = await request.post(`/report/generate/${interviewId}`);
