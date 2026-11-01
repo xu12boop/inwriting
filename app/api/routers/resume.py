@@ -9,7 +9,7 @@ from app.schemas.resume import ResumeResponse
 from app.utils.file_parser import extract_text_from_pdf, extract_text_from_docx
 from app.core.llm import get_llm_response
 from app.api.deps import get_current_user
-from app.core.rag import search_jd, add_jd_to_kb
+from app.core.rag import add_jd_to_kb, get_best_match_reranked
 
 router = APIRouter(prefix="/resume", tags=["简历解析"])
 
@@ -65,19 +65,19 @@ async def upload_and_parse_resume(
     except Exception:
         parsed_data = {"name": "张三", "skills": ["Python"], "projects": [], "education": "本科"}
 
-    # 2. 获取 JD (RAG 检索)
-    # 这里为了让评委看到 RAG 效果，如果库里没这个岗位，我们先主动加一条
-    jd_text = search_jd(target_job)
-    if jd_text == "暂无岗位JD信息。":
+    # 2. 获取 JD（RAG：向量 Top-K 召回 → 大模型重排 → 引用溯源）
+    match = get_best_match_reranked(target_job, k=5)
+    if not match["job_name"]:                      # 库里没有该岗位 → 冷启动补库后重试
         mock_jd = f"【{target_job}】要求：熟练掌握 Python，了解大模型 API 调用，具备良好的工程能力。"
         add_jd_to_kb(target_job, mock_jd)
-        jd_text = mock_jd
+        match = get_best_match_reranked(target_job, k=5)
+    jd_text = match["jd"]
 
-    # 3. 计算匹配度 (Agent 计算)
+    # 3. 计算匹配度 (Agent 计算)，并把检索引用一并注入，保证结论可溯源
     match_prompt = MATCH_AGENT_PROMPT.format(
         resume_json=json.dumps(parsed_data, ensure_ascii=False),
         jd_text=jd_text
-    )
+    ) + f"\n\n【检索依据】{match['citation']}"
     match_res = get_llm_response([{"role": "user", "content": match_prompt}])
     try:
         match_score = json.loads(match_res.strip().lstrip("```json").rstrip("```").strip()).get("match_score", 70.0)
