@@ -52,8 +52,8 @@
 ### 2. 启动后端 (Backend)
 
 ```bash
-# 进入项目根目录
-cd inwriting
+# 克隆仓库后已进入项目根目录（内含 app/、frontend/、requirements.txt）
+# 以下命令均在项目根目录执行，无需再 cd inwriting
 
 # 创建并激活虚拟环境
 python -m venv venv
