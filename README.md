@@ -80,7 +80,7 @@ inwriting/
 ### 1. 环境准备
 
 - Python >= 3.10
-- Node.js >= 18（建议 20 LTS 及以上）
+- Node.js >= 20.19（Vite 8 的最低要求；推荐 22 LTS）
 
 ### 2. 启动后端 (Backend)
 
