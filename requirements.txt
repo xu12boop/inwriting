@@ -17,6 +17,8 @@ pydantic-settings==2.7.0           # 从 .env 读取配置（BaseSettings）
 # ---- 认证与安全 ----
 python-jose[cryptography]==3.3.0   # JWT 签发与校验（jose.jwt）
 passlib[bcrypt]==1.7.4             # 密码哈希（CryptContext）
+bcrypt==4.0.1                      # 必须钉死在 4.0.x：passlib 1.7.4 与 bcrypt>=4.1 不兼容
+                                   # （5.x 会因内部 72 字节自检抛 ValueError，注册接口直接 500）
 
 # ---- AI / 大模型 / 向量库 ----
 requests==2.32.3                   # 调用智谱 GLM-4-Flash API（HTTP）
