@@ -271,7 +271,8 @@ const sendMessage = async () => {
   };
 
   try {
-    const response = await fetch("http://127.0.0.1:8001/interview/chat", {
+    const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+    const response = await fetch(`${API_BASE}/interview/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -1,0 +1,29 @@
+# ===== 智聘引擎 InWriting · 后端依赖清单 =====
+# 安装：pip install -r requirements.txt （建议在虚拟环境中执行）
+# 运行环境：Python 3.10 及以上
+# 说明：本文件与项目根目录 requirements.txt 保持一致。
+
+# ---- Web 框架 ----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0          # ASGI 服务器（生产用 gunicorn -k uvicorn.workers.UvicornWorker）
+python-multipart==0.0.20           # FastAPI 接收文件 / 表单上传（简历上传接口必需）
+
+# ---- 数据层 ----
+sqlalchemy==2.0.36                 # ORM（2.0 风格，项目使用 Mapped / mapped_column）
+pydantic==2.10.4                   # 数据校验与 Schema
+pydantic-settings==2.7.0           # 从 .env 读取配置（BaseSettings）
+
+# ---- 认证与安全 ----
+python-jose[cryptography]==3.3.0   # JWT 签发与校验（jose.jwt）
+passlib[bcrypt]==1.7.4             # 密码哈希（CryptContext）
+
+# ---- AI / 大模型 / 向量库 ----
+requests==2.32.3                   # 调用智谱 GLM-4-Flash API（HTTP）
+chromadb>=0.5.0                    # RAG 向量检索（自动拉取 numpy / onnxruntime 等依赖）
+
+# ---- 文件解析 ----
+pypdf==5.1.0                       # 解析 PDF 简历（PdfReader）
+python-docx==1.1.2                 # 解析 Word 简历（docx）
+
+# ---- 配置 ----
+python-dotenv==1.0.1               # 读取 .env（pydantic-settings 依赖）
