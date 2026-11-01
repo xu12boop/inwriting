@@ -118,6 +118,7 @@ import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { useUserStore } from "../stores/user";
 import axios from "axios";
+import { API_BASE } from "../api/base";
 import { ElMessage } from "element-plus";
 import { User, Lock } from "@element-plus/icons-vue";
 
@@ -141,7 +142,7 @@ const handleLogin = async () => {
     params.append("username", form.username);
     params.append("password", form.password);
 
-    const res = await axios.post("/api/auth/login", params);
+    const res = await axios.post(`${API_BASE}/auth/login`, params);
     userStore.setToken(res.data.access_token);
     ElMessage.success("登录成功，正在进入工作台...");
     router.push("/home");
@@ -158,7 +159,7 @@ const handleRegister = async () => {
     return ElMessage.warning("请输入账号和密码");
   loading.value = true;
   try {
-    await axios.post("/api/auth/register", {
+    await axios.post(`${API_BASE}/auth/register`, {
       username: form.username,
       password: form.password,
     });

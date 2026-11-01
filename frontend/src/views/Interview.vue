@@ -87,6 +87,7 @@ import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useUserStore } from "../stores/user";
 import request from "../api/request";
+import { API_BASE } from "../api/base";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import type { ChatMessage } from "../types";
 
@@ -123,6 +124,37 @@ const scrollToBottom = async () => {
 };
 
 // ================= 摄像头与视觉推理逻辑 =================
+// 静态资源前缀（兼容部署到子路径）
+const ASSET_BASE = import.meta.env.BASE_URL;
+
+// 加载超时保护：网络或模型异常时给出明确提示，而不是永久卡在“模型加载中”
+const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} 超时（${ms / 1000}s）`)),
+      ms,
+    );
+    p.then((v) => {
+      clearTimeout(timer);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+  });
+};
+
+const createLandmarker = (resolver: any, delegate: "GPU" | "CPU") =>
+  FaceLandmarker.createFromOptions(resolver, {
+    baseOptions: {
+      // 模型已随项目打包在 public/models 下，不再依赖境外 storage.googleapis.com
+      modelAssetPath: `${ASSET_BASE}models/face_landmarker.task`,
+      delegate,
+    },
+    runningMode: "VIDEO",
+    numFaces: 1,
+  });
+
 const initCameraAndAI = async () => {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -135,27 +167,48 @@ const initCameraAndAI = async () => {
       currentStatus.value = "模型加载中";
     }
 
-    const filesetResolver = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm",
+    // wasm 使用 node_modules 内同版本资源（1.1.1），避免 JS 与 wasm 跨版本不匹配导致静默挂死
+    const filesetResolver = await withTimeout(
+      FilesetResolver.forVisionTasks(`${ASSET_BASE}mediapipe/wasm`),
+      20000,
+      "MediaPipe WASM 加载",
     );
-    faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", // 换回谷歌官方稳定链接
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numFaces: 1,
-    });
+
+    let landmarker: any;
+    try {
+      landmarker = await withTimeout(
+        createLandmarker(filesetResolver, "GPU"),
+        30000,
+        "人脸模型加载",
+      );
+    } catch (gpuError) {
+      // 部分机器/无 GPU 的浏览器中 GPU delegate 会失败，回退 CPU 推理
+      console.warn("⚠️ GPU 推理初始化失败，回退 CPU 模式:", gpuError);
+      landmarker = await withTimeout(
+        createLandmarker(filesetResolver, "CPU"),
+        30000,
+        "人脸模型加载(CPU)",
+      );
+    }
+    faceLandmarker = landmarker;
     console.log("✅ MediaPipe 模型加载成功");
     currentStatus.value = "正常监考中";
     hasWarning.value = false;
     detectFace();
   } catch (error) {
     console.error("❌ 摄像头或模型加载失败:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    const isCameraError =
+      error instanceof DOMException &&
+      (error.name === "NotAllowedError" || error.name === "NotFoundError");
     if (stream) cameraActive.value = true;
-    currentStatus.value = "模型加载失败";
+    currentStatus.value = isCameraError ? "摄像头未授权" : "模型加载失败";
     hasWarning.value = true;
+    ElMessage.error(
+      isCameraError
+        ? "未获取到摄像头权限，视觉监考已跳过（面试仍可正常进行）"
+        : `视觉监考模型加载失败：${msg}（面试仍可正常进行）`,
+    );
   }
 };
 
@@ -165,7 +218,15 @@ const detectFace = () => {
 
   if (video.currentTime !== lastVideoTime && video.videoWidth > 0) {
     lastVideoTime = video.currentTime;
-    const results = faceLandmarker.detectForVideo(video, performance.now());
+    let results: any;
+    try {
+      results = faceLandmarker.detectForVideo(video, performance.now());
+    } catch (e) {
+      // 单帧推理失败（如视频尚未就绪）不应中断整个监考循环
+      console.warn("人脸检测单帧异常，已跳过:", e);
+      animationFrameId = requestAnimationFrame(detectFace);
+      return;
+    }
 
     const now = Date.now();
 
@@ -217,6 +278,14 @@ onUnmounted(() => {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   if (stream) {
     stream.getTracks().forEach((track) => track.stop());
+  }
+  if (faceLandmarker) {
+    try {
+      faceLandmarker.close();
+    } catch {
+      /* 已释放则忽略 */
+    }
+    faceLandmarker = null;
   }
 });
 // =======================================================
@@ -272,7 +341,6 @@ const sendMessage = async () => {
   };
 
   try {
-    const API_BASE: string = import.meta.env.VITE_API_BASE || "/api";
     const response = await fetch(`${API_BASE}/interview/chat`, {
       method: "POST",
       headers: {

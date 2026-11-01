@@ -106,8 +106,11 @@ def chat(
             system_content = PROMPT_TECH.format(resume_json=resume_json_str)
 
         # —— 规划 Agent：在生成提问前，由总控大脑决定策略并检索工具（可解释、可控）——
+        # 开场轮（面试官还没提过任何问题）不存在"上一轮回答"可供评估，
+        # 此时跳过规划既能避免错误判压，也能把首字延迟从十几秒压到 1-2 秒。
+        answered_turns = sum(1 for m in chat_history if m.get("role") == "assistant")
         plan = None
-        if settings.enable_planner:
+        if settings.enable_planner and answered_turns > 0:
             try:
                 plan = plan_next_turn(
                     interview.interview_type,

@@ -7,21 +7,26 @@ def get_llm_response(messages: list, temperature: float = 0.1, retries: int = 3)
     """
     非流式调用：用于简历解析、报告生成（需要完整 JSON 返回）
     """
-    url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    url = f"{settings.llm_base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.zhipuai_api_key}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "glm-4-flash",  # 👈 换成极速免费模型，不排队
+        "model": settings.llm_model,  # 默认 glm-4-flash，可通过 LLM_MODEL 覆盖
         "messages": messages,
         "temperature": temperature
     }
     
     for attempt in range(retries):
         try:
-            # 连接超时5秒，读取超时20秒
-            response = requests.post(url, json=payload, headers=headers, timeout=(5, 20))
+            # 连接超时5秒，读取超时20秒（可通过环境变量调整）
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=(settings.llm_timeout_connect, settings.llm_timeout_read),
+            )
             
             if response.status_code == 429:
                 print(f"⚠️ 触发限流（429），{2 * (attempt + 1)} 秒后尝试第 {attempt + 1} 次重试...")
@@ -50,20 +55,26 @@ def get_llm_stream(messages: list):
     """
     流式调用：用于面试对话（打字机效果）
     """
-    url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    url = f"{settings.llm_base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.zhipuai_api_key}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "glm-4-flash", # 👈 流式也用极速模型
+        "model": settings.llm_model, # 流式与非流式共用同一模型配置
         "messages": messages,
         "temperature": 0.7,
         "stream": True
     }
     
     try:
-        response = requests.post(url, json=payload, headers=headers, stream=True, timeout=(5, 20))
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            stream=True,
+            timeout=(settings.llm_timeout_connect, settings.llm_timeout_read),
+        )
         if response.status_code != 200:
             yield "抱歉，AI 服务器当前繁忙，请稍后再试。"
             return
@@ -87,31 +98,45 @@ def get_llm_stream(messages: list):
         yield "抱歉，网络连接出现问题。"
 
 
-def chat_with_tools(messages: list, tools: list, temperature: float = 0.3, max_tool_rounds: int = 2):
+def chat_with_tools(
+    messages: list,
+    tools: list,
+    temperature: float = 0.3,
+    max_tool_rounds: int = 2,
+    timeout: tuple | None = None,
+):
     """
     带工具（Function Calling / MCP）的非流式调用：用于规划 Agent。
     若模型返回 tool_calls，则执行工具并把结果回填，最多迭代 max_tool_rounds 轮，
     最终返回 (assistant_content, tool_calls_log)。
     tool_calls_log 形如 [{"name": ..., "arguments": ..., "result": ...}, ...]
+
+    timeout 用于给规划类调用单独设置更短的超时（避免拖慢主对话首字延迟）。
     """
-    url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    url = f"{settings.llm_base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.zhipuai_api_key}",
         "Content-Type": "application/json"
     }
+    req_timeout = timeout or (settings.llm_timeout_connect, settings.llm_timeout_read)
     tool_log = []
     working_messages = [dict(m) for m in messages]
 
     for _ in range(max_tool_rounds + 1):
         payload = {
-            "model": "glm-4-flash",
+            "model": settings.llm_model,
             "messages": working_messages,
             "tools": tools,
             "tool_choice": "auto",
             "temperature": temperature,
         }
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=(5, 20))
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=req_timeout,
+            )
             if response.status_code == 429:
                 print("⚠️ 规划 Agent 触发限流（429），返回空规划")
                 return "", tool_log

@@ -79,7 +79,13 @@ def plan_next_turn(interview_type: str, resume_json: str, history: list) -> dict
     )
     messages = [{"role": "user", "content": prompt}]
 
-    content, tool_log = chat_with_tools(messages, TOOL_SCHEMAS, temperature=0.3, max_tool_rounds=2)
+    content, tool_log = chat_with_tools(
+        messages,
+        TOOL_SCHEMAS,
+        temperature=0.3,
+        max_tool_rounds=1,       # 只允许一轮工具调用，控制首字延迟
+        timeout=(5, 10),         # 规划属于前置开销，超时即放弃并回退默认策略
+    )
 
     tool_calls = [
         {"name": t["name"], "arguments": t["arguments"], "result": t["result"]}

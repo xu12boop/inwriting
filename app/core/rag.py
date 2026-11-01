@@ -4,27 +4,32 @@ import chromadb
 from app.core.config import settings
 from app.core.llm import get_llm_response
 
-# 初始化本地持久化的 Chroma 客户端（数据存在 .chroma 文件夹）
-client = chromadb.PersistentClient(path="./.chroma")
+# 初始化本地持久化的 Chroma 客户端（目录可通过 CHROMA_DIR 配置，默认 ./.chroma）
+client = chromadb.PersistentClient(path=settings.chroma_dir)
 collection = client.get_or_create_collection(name="job_descriptions")
 
 def get_embedding(text: str):
     """调用智谱 API 生成文本向量"""
-    url = "https://open.bigmodel.cn/api/paas/v4/embeddings"
+    url = f"{settings.llm_base_url}/embeddings"
     headers = {"Authorization": f"Bearer {settings.zhipuai_api_key}"}
-    payload = {"model": "embedding-3", "input": text}
+    payload = {"model": settings.embedding_model, "input": text}
     try:
-        res = requests.post(url, json=payload, headers=headers, timeout=10).json()
+        res = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=(settings.llm_timeout_connect, settings.llm_timeout_read),
+        ).json()
         return res["data"][0]["embedding"]
     except Exception as e:
         print(f"获取向量失败: {e}")
         return None
 
 def add_jd_to_kb(job_name: str, jd_text: str):
-    """将岗位 JD 存入 Chroma"""
+    """将岗位 JD 存入 Chroma（使用 upsert，重复写入同一岗位不会报错）"""
     emb = get_embedding(jd_text)
     if emb:
-        collection.add(
+        collection.upsert(
             embeddings=[emb],
             documents=[jd_text],
             metadatas=[{"job_name": job_name}],

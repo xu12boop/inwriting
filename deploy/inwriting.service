@@ -1,0 +1,47 @@
+# ===== 智聘引擎 InWriting · systemd 服务单元 =====
+# 安装：
+#   sudo cp deploy/inwriting.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now inwriting
+# 查看日志：
+#   sudo journalctl -u inwriting -f
+#
+# 前提：项目部署在 /opt/inwriting，虚拟环境在 /opt/inwriting/venv，
+#       运行用户为 inwriting（见部署手册第 4 节）。
+
+[Unit]
+Description=InWriting API (FastAPI + Gunicorn)
+Documentation=https://github.com/xu12boop/inwriting
+After=network.target
+
+[Service]
+Type=simple
+User=inwriting
+Group=inwriting
+WorkingDirectory=/opt/inwriting
+
+# 让 gunicorn 能 import 到项目包，并使用虚拟环境内的解释器
+Environment="PATH=/opt/inwriting/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+
+# 从 .env 读取业务配置（ZHIPUAI_API_KEY / SECRET_KEY 等）
+EnvironmentFile=/opt/inwriting/.env
+
+ExecStart=/opt/inwriting/venv/bin/gunicorn --worker-class uvicorn.workers.UvicornWorker --config /opt/inwriting/deploy/gunicorn.conf.py app.main:app
+
+Restart=always
+RestartSec=3
+
+# 基础加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/inwriting
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=inwriting
+
+[Install]
+WantedBy=multi-user.target

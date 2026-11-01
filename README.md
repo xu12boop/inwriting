@@ -113,21 +113,45 @@ npm run dev          # 开发服务器，默认 http://localhost:5173
 > 前端通过 `VITE_API_BASE` 指定后端地址：未设置时默认请求同源 `/api`；本地联调可在 `frontend/.env.local` 写入
 > `VITE_API_BASE=http://127.0.0.1:8001`。
 
-### 4. 生产构建
+### 4. 生产构建与部署
 
 ```bash
-cd frontend && npm run build      # 产物在 frontend/dist
+cd frontend && npm run build      # 产物在 frontend/dist（约 19.4MB，含本地 wasm 与模型）
 ```
 
-### 5. 关键环境变量（`.env.example`）
+服务器部署（阿里云 2 核 2G 学生机 0 元方案）：
+
+- 依赖：`pip install -r requirements-prod.txt`（在 `requirements.txt` 基础上增加 gunicorn）
+- 进程托管：`deploy/gunicorn.conf.py` + `deploy/inwriting.service`（systemd）
+- 反向代理：`deploy/nginx.conf`（静态托管 + `/api` 反代，**已配置 `proxy_buffering off` 保证 SSE 流式**）
+- 完整步骤见 `提交材料/02-阿里云部署手册.md`
+
+### 5. 关键环境变量（`.env.example`，共 11 项）
 
 | 变量 | 说明 | 必填 |
 | --- | --- | --- |
 | `ZHIPUAI_API_KEY` | 智谱开放平台 API Key（GLM-4-Flash / embedding-3） | ✅ |
-| `SECRET_KEY` | JWT 签名密钥（部署时务必更换） | ✅ |
-| `DATABASE_URL` | 数据库连接串（默认 `sqlite:///./inwriting.db`） | ⭕ |
-| `CORS_ORIGINS` | 允许的前端源，逗号分隔（默认 `localhost:5173`） | ⭕ |
+| `SECRET_KEY` | JWT 签名密钥（部署时务必更换：`openssl rand -hex 32`） | ✅ |
+| `DATABASE_URL` | 数据库连接串（默认 `sqlite:///./inwriting.db`；生产用四斜杠绝对路径） | ⭕ |
+| `CHROMA_DIR` | RAG 向量库持久化目录（默认 `./.chroma`） | ⭕ |
+| `CORS_ORIGINS` | 允许的前端源，逗号分隔；同域反代部署可留空 | ⭕ |
+| `LLM_BASE_URL` | 大模型服务地址（默认智谱开放平台） | ⭕ |
+| `LLM_MODEL` | 对话模型（默认 `glm-4-flash`） | ⭕ |
+| `EMBEDDING_MODEL` | 向量模型（默认 `embedding-3`） | ⭕ |
+| `LLM_TIMEOUT_CONNECT` / `LLM_TIMEOUT_READ` | 模型调用超时（默认 5s / 20s） | ⭕ |
 | `ENABLE_PLANNER` | 是否启用规划 Agent（默认 `true`，异常时自动回退原流程） | ⭕ |
+| `MAX_UPLOAD_MB` | 简历上传大小上限（默认 10） | ⭕ |
+
+前端侧只有一个变量：`VITE_API_BASE`。未设置时默认请求同源 `/api`；前后端分域名部署时在 `frontend/.env.production` 写入完整后端地址即可，无需改代码。
+
+### 6. 版本
+
+当前版本 **v1.0.0**，可通过 `GET /health` 查看运行时版本与开关状态：
+
+```json
+{"status":"ok","service":"inwriting-api","version":"1.0.0","planner":true,"llm":"glm-4-flash"}
+```
+
 
 ## 👥 团队信息
 

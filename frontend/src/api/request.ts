@@ -1,9 +1,10 @@
 import axios from "axios"
+import { API_BASE } from "./base"
 
 // 响应拦截器直接返回 data，因此实例解析出的结果在调用处视为 any，
 // 由各调用点按本地类型（见 ../types）自行断言，保持类型安全的同时避免 axios 泛型摩擦。
 const request: any = axios.create({
-  baseURL: "/api",
+  baseURL: API_BASE,
   timeout: 60000,
 })
 

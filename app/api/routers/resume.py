@@ -8,6 +8,7 @@ from app.models.user import User
 from app.schemas.resume import ResumeResponse
 from app.utils.file_parser import extract_text_from_pdf, extract_text_from_docx
 from app.core.llm import get_llm_response
+from app.core.config import settings
 from app.api.deps import get_current_user
 from app.core.rag import add_jd_to_kb, get_best_match_reranked
 
@@ -51,6 +52,12 @@ async def upload_and_parse_resume(
         raise HTTPException(status_code=400, detail="仅支持 PDF 或 DOCX")
 
     content = await file.read()
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件过大，请上传 {settings.max_upload_mb}MB 以内的简历",
+        )
     raw_text = extract_text_from_pdf(content) if filename.endswith(".pdf") else extract_text_from_docx(content)
     if not raw_text.strip():
         raise HTTPException(status_code=400, detail="无法提取到文本")

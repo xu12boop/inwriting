@@ -1,0 +1,10 @@
+# ===== 生产环境额外依赖（Linux / macOS 部署用）=====
+# 本地 Windows 开发不需要安装本文件：Windows 无法运行 gunicorn，
+# 开发阶段直接用 `python -m uvicorn app.main:app --reload --port 8001` 即可。
+#
+# 服务器安装：pip install -r requirements-prod.txt
+
+-r requirements.txt
+
+# ASGI 应用服务器（配合 uvicorn worker 提供多进程托管与优雅重启）
+gunicorn==23.0.0
