@@ -156,6 +156,27 @@ const createLandmarker = (resolver: any, delegate: "GPU" | "CPU") =>
   });
 
 const initCameraAndAI = async () => {
+  // 浏览器只在「安全上下文」（HTTPS / localhost / 127.0.0.1）下暴露 navigator.mediaDevices。
+  // 通过 http://公网IP 访问时该对象为 undefined，直接调用 .getUserMedia 会抛 TypeError，
+  // 提示会变成一段看不懂的英文。这里提前判空，给出可读的中文说明。
+  if (!navigator.mediaDevices?.getUserMedia) {
+    cameraActive.value = false;
+    currentStatus.value = "当前环境不支持摄像头";
+    hasWarning.value = false;
+    console.warn(
+      "[视觉监考] mediaDevices 不可用，已跳过 | isSecureContext =",
+      window.isSecureContext,
+      "| origin =",
+      window.location.origin,
+    );
+    ElMessage.warning(
+      window.isSecureContext
+        ? "当前浏览器未提供摄像头接口，视觉监考已跳过（面试仍可正常进行）"
+        : "当前为 HTTP 访问，浏览器安全策略禁止调用摄像头；视觉监考需 HTTPS 或 localhost（面试仍可正常进行）",
+    );
+    return;
+  }
+
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: true,
@@ -198,17 +219,26 @@ const initCameraAndAI = async () => {
   } catch (error) {
     console.error("❌ 摄像头或模型加载失败:", error);
     const msg = error instanceof Error ? error.message : String(error);
-    const isCameraError =
-      error instanceof DOMException &&
-      (error.name === "NotAllowedError" || error.name === "NotFoundError");
+    const name = error instanceof DOMException ? error.name : "";
+
+    // 按浏览器错误类型给出可区分的提示，避免把"没授权"和"模型加载失败"混为一谈
+    let status = "视觉监考不可用";
+    let tip = `视觉监考模型加载失败：${msg}（面试仍可正常进行）`;
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      status = "摄像头未授权";
+      tip = "未获取到摄像头权限，视觉监考已跳过（面试仍可正常进行）";
+    } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+      status = "未检测到摄像头";
+      tip = "未检测到可用摄像头，视觉监考已跳过（面试仍可正常进行）";
+    } else if (name === "NotReadableError") {
+      status = "摄像头被占用";
+      tip = "摄像头可能被其他程序占用，视觉监考已跳过（面试仍可正常进行）";
+    }
+
     if (stream) cameraActive.value = true;
-    currentStatus.value = isCameraError ? "摄像头未授权" : "模型加载失败";
+    currentStatus.value = status;
     hasWarning.value = true;
-    ElMessage.error(
-      isCameraError
-        ? "未获取到摄像头权限，视觉监考已跳过（面试仍可正常进行）"
-        : `视觉监考模型加载失败：${msg}（面试仍可正常进行）`,
-    );
+    ElMessage.error(tip);
   }
 };
 
