@@ -20,6 +20,9 @@ class Report(Base):
     learning_plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     overall_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 逐题点评：[{question, answer_digest, verdict, comment}]
+    # 老库通过启动时的 ADD COLUMN 自愈补齐（见 app/db/migrations.py），老报告该列为 NULL
+    question_reviews: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

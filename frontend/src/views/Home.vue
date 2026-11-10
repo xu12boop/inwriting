@@ -117,6 +117,10 @@
             </div>
           </div>
 
+          <div v-if="matchDetail?.verdict" class="verdict-line">
+            {{ matchDetail.verdict }}
+          </div>
+
           <div class="skills-section">
             <h4 class="sub-title">核心技能提取</h4>
             <div class="tags">
@@ -130,6 +134,42 @@
               </el-tag>
             </div>
           </div>
+
+          <!-- 命中与差距：把"85 分"拆成可核对的两列 -->
+          <div
+            v-if="matchHits.length || matchGaps.length"
+            class="match-section"
+          >
+            <div v-if="matchHits.length" class="match-col">
+              <h4 class="sub-title">✅ 命中要求</h4>
+              <div v-for="item in matchHits" :key="item.requirement" class="hit-row">
+                <div class="hit-req">{{ item.requirement }}</div>
+                <div v-if="item.evidence" class="hit-ev">{{ item.evidence }}</div>
+              </div>
+            </div>
+            <div v-if="matchGaps.length" class="match-col">
+              <h4 class="sub-title">⚠️ 差距项</h4>
+              <div v-for="gap in matchGaps" :key="gap" class="gap-row">
+                {{ gap }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 检索依据：说明"这个岗位"来自知识库里的哪一条 JD -->
+          <div v-if="matchDetail?.citation" class="cite-box">
+            <div class="cite-head" @click="citeOpen = !citeOpen">
+              <span class="cite-title">🔍 检索依据</span>
+              <span class="cite-job">{{ matchDetail.job_name }}</span>
+              <span class="cite-toggle">{{ citeOpen ? "收起" : "展开" }}</span>
+            </div>
+            <div v-show="citeOpen" class="cite-body">
+              <p class="cite-line">{{ matchDetail.citation }}</p>
+              <div v-if="matchDetail.jd_excerpt" class="jd-excerpt">
+                <div class="jd-label">命中的岗位描述（节选）</div>
+                <p>{{ matchDetail.jd_excerpt }}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -137,7 +177,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useUserStore } from "../stores/user";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
@@ -153,6 +193,12 @@ const file = ref<File | null>(null);
 const uploading = ref<boolean>(false);
 const resumeData = ref<ResumeData | null>(null);
 const interviewType = ref<string>("tech");
+const citeOpen = ref<boolean>(false);
+
+// 匹配明细藏在 parsed_json._match 里；老简历没有该字段时整块自动隐藏
+const matchDetail = computed(() => resumeData.value?.parsed_json?._match);
+const matchHits = computed(() => matchDetail.value?.matched ?? []);
+const matchGaps = computed(() => matchDetail.value?.gaps ?? []);
 
 const handleLogout = (): void => {
   userStore.logout();
@@ -476,6 +522,121 @@ const startInterview = async () => {
   padding: 0 12px;
   height: 32px;
   line-height: 30px;
+}
+
+/* 匹配结论 / 命中 / 差距 / 检索依据 */
+.verdict-line {
+  width: 100%;
+  text-align: center;
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.16);
+}
+.match-section {
+  width: 100%;
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+}
+.match-col {
+  flex: 1;
+  min-width: 0;
+}
+.hit-row {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.07);
+  border-left: 2px solid rgba(16, 185, 129, 0.5);
+}
+.hit-req {
+  font-size: 13px;
+  color: #e2e8f0;
+  line-height: 1.6;
+}
+.hit-ev {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.6;
+  margin-top: 3px;
+}
+.gap-row {
+  padding: 7px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.08);
+  border-left: 2px solid rgba(251, 191, 36, 0.5);
+}
+.cite-box {
+  width: 100%;
+  margin-top: 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.45);
+  overflow: hidden;
+}
+.cite-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.cite-head:hover {
+  background: rgba(56, 189, 248, 0.06);
+}
+.cite-title {
+  font-size: 13px;
+  color: #38bdf8;
+  font-weight: 600;
+}
+.cite-job {
+  flex: 1;
+  font-size: 12px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cite-toggle {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.cite-body {
+  padding: 0 14px 14px;
+}
+.cite-line {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #94a3b8;
+}
+.jd-excerpt {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.jd-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+.jd-excerpt p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
 }
 
 .fade-in {

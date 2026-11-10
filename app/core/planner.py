@@ -12,9 +12,9 @@
 直接对应评分项：Agent/工作流设计（8%）、MCP/工具集成（4%）。
 """
 
-import json
+from app.core.jsonutil import loads_object
 from app.core.llm import chat_with_tools
-from app.core.tools import TOOL_SCHEMAS
+from app.core.tools import TOOL_SCHEMAS, execute_tool, match_tech_concept
 
 # 各角色的规划侧重点
 _ROLE_HINT = {
@@ -95,19 +95,32 @@ def plan_next_turn(interview_type: str, resume_json: str, history: list) -> dict
     for t in tool_calls:
         tool_text += f"\n[工具:{t['name']}] {t['result']}"
 
-    # 解析 JSON
+    # 解析 JSON（模型偶尔带 ``` 围栏或前后杂字，统一走容错解析）
     try:
-        cleaned = content.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:-3].strip()
-        elif cleaned.startswith("```"):
-            cleaned = cleaned[3:-3].strip()
-        parsed = json.loads(cleaned)
+        parsed = loads_object(content)
         decision = parsed.get("decision", "deepen")
         focus = parsed.get("focus", "")
         reasoning = parsed.get("reasoning", "")
     except Exception:
         decision, focus, reasoning = "deepen", "", "（规划 Agent 未返回结构化结果，沿用默认深挖策略）"
+
+    # —— 工具调用的确定性兜底 ——
+    # 小模型经常把 use_tools 填成 false，导致"工具层"整轮不出现。
+    # 这里按聚焦点里出现的技术词直接查一次本地考点库：
+    # 零延迟、可复现，且结果确实进了下一轮的提示词。
+    if not tool_calls and decision in {"deepen", "pressure", "switch"}:
+        last_user = ""
+        for m in reversed(history):
+            if m.get("role") == "user":
+                last_user = m.get("content", "")
+                break
+        concept = match_tech_concept(f"{focus} {last_user}")
+        if concept:
+            result = execute_tool("lookup_tech_concept", {"concept": concept})
+            tool_calls.append(
+                {"name": "lookup_tech_concept", "arguments": {"concept": concept}, "result": result}
+            )
+            tool_text += f"\n[工具:lookup_tech_concept] {result}"
 
     if tool_text:
         focus = (focus + "\n参考资料：" + tool_text).strip()

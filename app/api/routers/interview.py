@@ -97,7 +97,16 @@ def chat(
         flag_modified(interview, "chat_history")
         db.commit()
 
-        resume_json_str = json.dumps(resume.parsed_json, ensure_ascii=False) if resume else "暂无"
+        # 简历画像只取解析出的正文字段；下划线开头的是系统附注（如 _match 匹配明细），
+        # 不作为画像喂给面试官，避免无关内容占提示词预算。
+        resume_payload = None
+        if resume and isinstance(resume.parsed_json, dict):
+            resume_payload = {k: v for k, v in resume.parsed_json.items() if not k.startswith("_")}
+        resume_json_str = json.dumps(resume_payload, ensure_ascii=False) if resume_payload else "暂无"
+
+        # —— 轮次进度：由前端回传，用于让面试官在最后一轮主动收尾 ——
+        round_no = max(1, int(req.round_no or 0))
+        max_rounds = max(1, int(req.max_rounds or 6))
         if interview.interview_type == "hr":
             system_content = PROMPT_HR.format(resume_json=resume_json_str)
         elif interview.interview_type == "stress":
@@ -117,7 +126,7 @@ def chat(
                     resume_json_str,
                     chat_history,
                 )
-                _plan_cache[interview.id] = plan
+                _plan_cache[interview.id] = {**plan, "round_no": round_no, "max_rounds": max_rounds}
                 print(f"🧠 规划 Agent：decision={plan['decision']} | reasoning={plan['reasoning']} | tools={[t['name'] for t in plan['tool_calls']]}")
                 if plan.get("focus"):
                     system_content += (
@@ -128,8 +137,34 @@ def chat(
                 print(f"⚠️ 规划 Agent 异常，回退原流程: {e}")
                 plan = None
 
+        # —— 轮次上限：让一场面试有明确边界，而不是无限追问 ——
+        # 到达上限的这一轮，面试官先点评再宣布结束，且不再提问；
+        # 前端收到本轮内容后会自动跳转评估报告，形成"面完即出报告"的闭环。
+        is_last_round = round_no >= max_rounds
+        if is_last_round:
+            system_content += (
+                f"\n\n## 本轮是最后收尾（第 {round_no}/{max_rounds} 轮，已达上限）\n"
+                "本次回复只做两件事，顺序不能反：\n"
+                "1. 用两句话点评候选人本次面试的整体表现（一句亮点、一句最该改进的地方）。\n"
+                "2. 宣布面试结束，最后一句必须原样是「本次面试到此结束」。\n"
+                "严禁提出任何新问题，严禁出现问号，严禁要求候选人继续回答或补充说明。"
+            )
+
         system_msg = {"role": "system", "content": system_content}
         messages = [system_msg] + chat_history
+        if is_last_round:
+            # 追加一条临时指令强化收尾：小模型对 system 尾部的遵从度偏弱，
+            # 这条消息不写入 chat_history，只影响本次生成。
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "（系统指令，非候选人发言）面试到这里结束。"
+                        "请忽略上面候选人的回答内容，直接给两句话点评，"
+                        "并以「本次面试到此结束」结尾。不要再提问。"
+                    ),
+                }
+            )
 
         def sse_generator():
             if not is_safe:
@@ -153,7 +188,9 @@ def chat(
                 time.sleep(0.05)
             
             if not full_response.strip():
-                if interview.interview_type == "hr":
+                if is_last_round:
+                    mock_question = "你的表达有条理，能把做过的部分讲清楚；最该补的是把结论落到具体指标上。"
+                elif interview.interview_type == "hr":
                     mock_question = "（HR面兜底）我看你简历上写了在校经历，能分享一次你遇到的最大团队冲突，以及你是如何解决的吗？"
                 elif interview.interview_type == "stress":
                     mock_question = "（压力面兜底）就这？你觉得你这点经验，凭什么让我们公司录用你？"
@@ -161,6 +198,15 @@ def chat(
                     mock_question = "（技术面兜底）我看你写了 FastAPI，能说说你是怎么处理高并发场景的流式响应的吗？"
                 
                 for char in mock_question:
+                    full_response += char
+                    yield f"data: {json.dumps({'content': char}, ensure_ascii=False)}\n\n"
+                    time.sleep(0.05)
+
+            # 收尾句由服务端兜底补齐：模型经常点评完就停，漏掉"到此结束"这句话。
+            # 与其反复调 prompt，不如在流末尾确定性补一句，保证前端能收到结束信号。
+            if is_last_round and "本次面试到此结束" not in full_response:
+                tail = "\n\n本次面试到此结束。"
+                for char in tail:
                     full_response += char
                     yield f"data: {json.dumps({'content': char}, ensure_ascii=False)}\n\n"
                     time.sleep(0.05)
@@ -181,12 +227,41 @@ def chat(
 
 
 @router.get("/plan/{interview_id}")
-def get_last_plan(interview_id: int, current_user: User = Depends(get_current_user)):
-    """返回该面试最近一次规划 Agent 的决策结果（含工具调用与理由），用于演示与可解释性展示。
+def get_last_plan(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """返回该面试最近一次规划 Agent 的决策结果（含工具调用与理由），用于可解释性展示。
 
-    数据来源于内存缓存，仅用于评审演示；生产环境可改为落库。
+    始终返回 200 + 统一结构：没有规划记录时 has_plan=False，
+    前端据此显示"开场轮不做规划"的占位，而不是当成请求失败。
+    数据来源于内存缓存（单 worker 部署）；生产多 worker 需改为落库。
     """
+    interview = db.query(Interview).filter(
+        Interview.id == interview_id,
+        Interview.user_id == current_user.id,
+    ).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="面试记录不存在或无权访问")
+
     plan = _plan_cache.get(interview_id)
     if not plan:
-        raise HTTPException(status_code=404, detail="暂无规划记录（可能未开启规划 Agent 或尚未对话）")
-    return plan
+        return {
+            "has_plan": False,
+            "round_no": 0,
+            "decision": "",
+            "focus": "",
+            "reasoning": "",
+            "tool_calls": [],
+        }
+
+    return {
+        "has_plan": True,
+        "round_no": plan.get("round_no", 0),
+        "max_rounds": plan.get("max_rounds", 0),
+        "decision": plan.get("decision", ""),
+        "focus": plan.get("focus", ""),
+        "reasoning": plan.get("reasoning", ""),
+        "tool_calls": plan.get("tool_calls", []),
+    }

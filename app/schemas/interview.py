@@ -9,6 +9,10 @@ class InterviewStartRequest(BaseModel):
 class ChatRequest(BaseModel):
     interview_id: int
     user_message: str
+    # 轮次进度：由前端回传，用于在到达上限时让面试官主动收尾。
+    # 均带默认值，旧版前端不传也能正常走老流程。
+    round_no: int = 0
+    max_rounds: int = 6
 
 class InterviewResponse(BaseModel):
     id: int
@@ -26,6 +30,8 @@ class ReportResponse(BaseModel):
     learning_plan: List[Dict[str, Any]]
     overall_score: float
     summary: str
+    # 逐题点评；老报告没有该字段时为 None，前端自动隐藏整块
+    question_reviews: Optional[List[Dict[str, Any]]] = None
     
     class Config:
         from_attributes = True

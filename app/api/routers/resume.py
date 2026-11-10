@@ -11,8 +11,55 @@ from app.core.llm import get_llm_response
 from app.core.config import settings
 from app.api.deps import get_current_user
 from app.core.rag import add_jd_to_kb, get_best_match_reranked
+from app.core.jsonutil import loads_object
 
 router = APIRouter(prefix="/resume", tags=["简历解析"])
+
+# 重排最高分低于该阈值，说明库里没有真正相近的岗位，需要先补一条再检索
+RERANK_MIN_SCORE = 55.0
+
+
+def _loads_json(raw: str) -> dict:
+    """容错解析大模型返回的 JSON：去掉 ``` 围栏与前后杂字，失败则抛异常由调用方兜底。"""
+    return loads_object(raw)
+
+
+def _normalize_str_list(value, limit: int = 5) -> list[str]:
+    """把模型可能返回的 str / list 统一成干净字符串列表，并截断长度与条数。"""
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = value
+    else:
+        return []
+    out: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            out.append(text[:40])
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _normalize_matched(value, limit: int = 5) -> list[dict]:
+    """逐条命中：{"requirement", "evidence"}；模型偶尔返回纯字符串，统一降级处理。"""
+    if not isinstance(value, list):
+        return []
+    out: list[dict] = []
+    for item in value:
+        if isinstance(item, dict):
+            req = str(item.get("requirement", "")).strip()[:40]
+            ev = str(item.get("evidence", "")).strip()[:60]
+            if req or ev:
+                out.append({"requirement": req, "evidence": ev})
+        else:
+            text = str(item).strip()
+            if text:
+                out.append({"requirement": text[:40], "evidence": ""})
+        if len(out) >= limit:
+            break
+    return out
 
 RESUME_PARSE_PROMPT = """
 你是一个专业的 HR 简历解析助手。请从以下简历文本中提取关键信息，并严格按 JSON 格式输出。
@@ -28,16 +75,26 @@ JSON 结构要求：
 {resume_text}
 """
 
-# 🚨 Agent 工作流：分析简历与 JD 的匹配度
+# 🚨 Agent 工作流：分析简历与 JD 的匹配度（结论 + 逐条命中 + 差距项，支撑"可溯源"）
 MATCH_AGENT_PROMPT = """
-你是一个高级技术评估专家。这是候选人的简历特征：
+你是一位高级技术评估专家。这是候选人的简历特征：
 {resume_json}
 
 这是目标岗位的 JD 要求：
 {jd_text}
 
-请对比这两者，给出一个 0-100 的岗位匹配度得分，并严格输出纯 JSON 格式（不要任何 Markdown 包裹）：
-{{"match_score": 85}}
+请对比两者，严格输出纯 JSON（不要任何 Markdown 包裹、不要解释文字）：
+{{
+  "match_score": 0 到 100 的整数,
+  "matched": [{{"requirement": "JD 中的一条具体要求", "evidence": "简历里对应的经历或技能"}}],
+  "gaps": ["JD 要求但简历里没有或明显偏弱的能力"],
+  "verdict": "一句话结论，例如：基础匹配，缺消息队列实战"
+}}
+
+约束：
+1. matched 最多 5 条，gaps 最多 3 条；每条不超过 30 个字。
+2. 只依据 JD 与简历文本作判断，不得臆造简历里没有的经历。
+3. gaps 要具体到能力点（如"消息队列实战"），不要写"经验不足"这类空话。
 """
 
 @router.post("/upload", response_model=ResumeResponse)
@@ -67,16 +124,23 @@ async def upload_and_parse_resume(
     ai_response = get_llm_response([{"role": "user", "content": prompt}])
     
     try:
-        cleaned = ai_response.strip().lstrip("```json").rstrip("```").strip()
-        parsed_data = json.loads(cleaned)
+        parsed_data = loads_object(ai_response)
     except Exception:
         parsed_data = {"name": "张三", "skills": ["Python"], "projects": [], "education": "本科"}
 
     # 2. 获取 JD（RAG：向量 Top-K 召回 → 大模型重排 → 引用溯源）
     match = get_best_match_reranked(target_job, k=5)
-    if not match["job_name"]:                      # 库里没有该岗位 → 冷启动补库后重试
-        mock_jd = f"【{target_job}】要求：熟练掌握 Python，了解大模型 API 调用，具备良好的工程能力。"
-        add_jd_to_kb(target_job, mock_jd)
+    # 库中没有相近岗位（空库 / 重排最高分偏低）时冷启动补一条该岗位的通用要求，再重检。
+    # 只看"是否为空"是不够的：库里有别的岗位时会命中一条不相关的 JD，引用就失真了。
+    if not match["job_name"] or float(match.get("score") or 0) < RERANK_MIN_SCORE:
+        cold_jd = (
+            f"【{target_job}】\n"
+            f"1. 具备 {target_job} 相关的项目经验，能说清自己做过的部分与取舍；\n"
+            "2. 熟悉 Python 或同等工作语言，能独立完成模块开发与联调；\n"
+            "3. 具备基本的工程习惯：版本管理、接口约定、日志与异常处理；\n"
+            "4. 遇到问题能定位到具体环节，而不是只描述现象。"
+        )
+        add_jd_to_kb(target_job, cold_jd)
         match = get_best_match_reranked(target_job, k=5)
     jd_text = match["jd"]
 
@@ -86,10 +150,31 @@ async def upload_and_parse_resume(
         jd_text=jd_text
     ) + f"\n\n【检索依据】{match['citation']}"
     match_res = get_llm_response([{"role": "user", "content": match_prompt}])
+
+    # 解析失败只影响"明细"，不影响主流程：分数仍给兜底值，界面隐藏差距项与依据。
+    match_detail = {
+        "job_name": match["job_name"],
+        "citation": match["citation"],
+        "jd_excerpt": jd_text[:600],
+        "retrieval_score": round(float(match.get("score") or 0), 1),
+        "matched": [],
+        "gaps": [],
+        "verdict": "",
+    }
     try:
-        match_score = json.loads(match_res.strip().lstrip("```json").rstrip("```").strip()).get("match_score", 70.0)
-    except Exception:
-        match_score = 75.0 # 兜底
+        parsed_match = _loads_json(match_res)
+        match_score = float(parsed_match.get("match_score", 70.0))
+        match_detail["matched"] = _normalize_matched(parsed_match.get("matched"))
+        match_detail["gaps"] = _normalize_str_list(parsed_match.get("gaps"), limit=3)
+        match_detail["verdict"] = str(parsed_match.get("verdict", ""))[:60]
+    except Exception as e:
+        print(f"⚠️ 匹配明细解析失败，仅保留分数: {e}")
+        match_score = 75.0  # 兜底
+
+    # 明细挂到 parsed_json 的 _match 键：复用已有 JSON 列，不新增数据库字段（免迁移）。
+    # interview.py 在构造简历画像时会剔除下划线开头的键，不影响面试官提示词。
+    if isinstance(parsed_data, dict):
+        parsed_data["_match"] = match_detail
 
     # 4. 存库 (使用当前登录用户的 ID)
     new_resume = Resume(

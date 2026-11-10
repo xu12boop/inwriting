@@ -14,6 +14,7 @@ from fastapi.responses import RedirectResponse
 from app import models  # noqa: F401  确保模型在 create_all 前完成注册
 from app.core.config import settings
 from app.db.database import Base, engine
+from app.db.migrations import ensure_extra_columns
 from app.api.routers import auth, resume, interview, report
 
 
@@ -21,6 +22,18 @@ from app.api.routers import auth, resume, interview, report
 async def lifespan(app: FastAPI):
     # 首次启动自动建表（SQLite 场景足够；迁移到 MySQL/PostgreSQL 时改用 Alembic）
     Base.metadata.create_all(bind=engine)
+    # 已存在的表补新增字段（幂等、失败不阻断启动）
+    ensure_extra_columns(engine)
+
+    # 向量库预热：库里条目过少时补一批真实岗位 JD，让"检索依据"有可比对的候选。
+    # 失败只告警，不阻断启动（无外网/无 Key 时仍可跑通主流程）。
+    try:
+        from app.core.rag import collection, get_embedding
+        from app.core.seed_jds import seed_if_empty
+
+        seed_if_empty(collection, get_embedding)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️  向量库预热跳过: {e}")
 
     # 部署自检提示：保留默认密钥 / 未配置 API Key 时给出醒目告警
     if settings.is_default_secret:

@@ -8,7 +8,13 @@
         <span v-else-if="interviewType === 'stress'">😈 极限压力面试间</span>
         <span v-else>👨‍💻 深度技术面试间</span>
       </h2>
-      <div>
+      <div class="header-right">
+        <div class="round-chip" :class="{ over: interviewOver }">
+          <span class="round-main">第 {{ Math.max(answeredRounds, 1) }} / {{ maxRounds }} 轮</span>
+          <span class="round-sub">{{
+            interviewOver ? "面试已结束，正在生成报告" : "答完一轮自动追问"
+          }}</span>
+        </div>
         <el-button
           type="warning"
           round
@@ -27,6 +33,7 @@
       </div>
     </header>
 
+    <div class="workspace">
     <div class="chat-area" ref="chatBoxRef">
       <div
         v-for="(msg, index) in chatList"
@@ -49,10 +56,61 @@
           <span v-if="msg.role === 'ai' && msg.typing" class="cursor">|</span>
         </div>
       </div>
+      </div>
+
+      <!-- 🧠 决策面板：把规划 Agent 每轮的判断摊开，让"为什么这么问"可见 -->
+      <aside class="decision-panel" :class="{ collapsed: !panelOpen }">
+        <div class="panel-head">
+          <span class="panel-title">面试官决策</span>
+          <button class="panel-toggle" @click="panelOpen = !panelOpen">
+            {{ panelOpen ? "收起" : "展开" }}
+          </button>
+        </div>
+
+        <div v-show="panelOpen" class="panel-body">
+          <div v-if="!plan.has_plan" class="panel-empty">{{ planHint }}</div>
+
+          <template v-else>
+            <div class="decision-badge" :class="decisionMeta.cls">
+              {{ decisionMeta.label }}
+              <span class="decision-key">{{ plan.decision }}</span>
+            </div>
+
+            <div class="panel-block">
+              <div class="panel-label">聚焦点</div>
+              <div class="panel-text">{{ focusMain || "—" }}</div>
+              <div v-if="focusRef" class="panel-ref">
+                <span class="ref-tag">检索依据</span>
+                <span class="ref-text">{{ focusRef }}</span>
+              </div>
+            </div>
+
+            <div class="panel-block">
+              <div class="panel-label">为什么这么问</div>
+              <div class="panel-text">{{ plan.reasoning || "—" }}</div>
+            </div>
+
+            <div class="panel-block" v-if="plan.tool_calls.length">
+              <div class="panel-label">本轮调用工具</div>
+              <div class="tool-list">
+                <span class="tool-chip" v-for="t in plan.tool_calls" :key="t.name">{{
+                  t.name
+                }}</span>
+              </div>
+            </div>
+
+            <div class="panel-foot">规划 Agent · 每轮刷新一次</div>
+          </template>
+        </div>
+      </aside>
     </div>
 
     <!-- 🚨 摄像头监考悬浮窗 -->
-    <div class="camera-monitor" v-show="cameraActive">
+    <div
+      class="camera-monitor"
+      :class="panelOpen ? 'shift-left' : 'shift-min'"
+      v-show="cameraActive"
+    >
       <video ref="videoRef" autoplay playsinline muted></video>
 
       <!-- 修复：只有当 hasWarning 为 true 时才变红 -->
@@ -65,16 +123,21 @@
     <div class="glass-footer">
       <el-input
         v-model="userInput"
-        placeholder="输入你的回答，按 Enter 发送..."
+        :placeholder="
+          interviewOver
+            ? '本次面试已结束，正在生成评估报告…'
+            : '输入你的回答，按 Enter 发送...'
+        "
         class="chat-input"
         @keyup.enter="sendMessage"
-        :disabled="isTyping || generatingReport"
+        :disabled="isTyping || generatingReport || interviewOver"
       />
       <el-button
         type="primary"
         class="send-btn"
         @click="sendMessage"
         :loading="isTyping"
+        :disabled="interviewOver"
         >发送</el-button
       >
     </div>
@@ -82,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useUserStore } from "../stores/user";
@@ -102,6 +165,99 @@ const userInput = ref<string>("");
 const isTyping = ref<boolean>(false);
 const generatingReport = ref<boolean>(false);
 const chatBoxRef = ref<HTMLElement | null>(null);
+
+// ================= 决策面板与轮次进度 =================
+// 一场面试问几轮：技术面最多、压力面最短，符合真实面试的节奏差异。
+const ROUND_LIMIT: Record<string, number> = { tech: 6, hr: 5, stress: 4 };
+const maxRounds = computed<number>(() => ROUND_LIMIT[interviewType.value] ?? 6);
+const answeredRounds = ref<number>(0);
+const interviewOver = ref<boolean>(false);
+const panelOpen = ref<boolean>(true);
+
+type PlanView = {
+  has_plan: boolean;
+  round_no: number;
+  max_rounds: number;
+  decision: string;
+  focus: string;
+  reasoning: string;
+  tool_calls: { name: string; arguments?: unknown; result?: string }[];
+};
+
+const emptyPlan: PlanView = {
+  has_plan: false,
+  round_no: 0,
+  max_rounds: 0,
+  decision: "",
+  focus: "",
+  reasoning: "",
+  tool_calls: [],
+};
+const plan = ref<PlanView>({ ...emptyPlan });
+const planFetchedOnce = ref<boolean>(false);
+
+const DECISION_META: Record<string, { label: string; cls: string }> = {
+  deepen: { label: "深挖", cls: "d-deepen" },
+  switch: { label: "换方向", cls: "d-switch" },
+  pressure: { label: "加压", cls: "d-pressure" },
+  press: { label: "加压", cls: "d-pressure" },
+  close: { label: "收尾", cls: "d-close" },
+};
+
+const decisionMeta = computed(() => {
+  const raw = (plan.value.decision || "").toLowerCase();
+  for (const key of Object.keys(DECISION_META)) {
+    if (raw.includes(key)) return DECISION_META[key];
+  }
+  return { label: "待判定", cls: "d-idle" };
+});
+
+// focus 里可能被 planner 追加了"参考资料：[工具:xxx] …"，拆开显示，避免正文被工具原文淹没
+const focusMain = computed(
+  () => (plan.value.focus || "").split("\n参考资料：")[0].trim(),
+);
+const focusRef = computed(() => {
+  const parts = (plan.value.focus || "").split("\n参考资料：");
+  if (parts.length < 2) return "";
+  return parts.slice(1).join(" ").replace(/\s+/g, " ").slice(0, 200);
+});
+
+const planHint = computed(() => {
+  if (interviewOver.value) {
+    return "面试已结束，正在为你生成评估报告。往轮的判断仍可在这里回看。";
+  }
+  if (answeredRounds.value === 0) {
+    return "开场轮不做规划：面试官直接出题，省掉十几秒等待。你答完第一轮，这里会显示它的判断。";
+  }
+  if (answeredRounds.value === 1) {
+    return "第一轮用来定基线，规划 Agent 从第二轮开始介入。再答一轮，这里会显示它为什么这么问。";
+  }
+  return "本轮规划尚未返回，通常在你开始回答后 1-2 秒内刷新。";
+});
+
+/** 拉取最近一轮规划结果；失败静默处理，不让侧栏接口影响面试主流程 */
+const loadPlan = async () => {
+  if (!interviewId.value) return;
+  try {
+    const res: any = await request.get(`/interview/plan/${interviewId.value}`);
+    if (res?.has_plan) {
+      plan.value = {
+        has_plan: true,
+        round_no: res.round_no ?? 0,
+        max_rounds: res.max_rounds ?? 0,
+        decision: res.decision ?? "",
+        focus: res.focus ?? "",
+        reasoning: res.reasoning ?? "",
+        tool_calls: Array.isArray(res.tool_calls) ? res.tool_calls : [],
+      };
+      planFetchedOnce.value = true;
+    } else if (!planFetchedOnce.value) {
+      plan.value = { ...emptyPlan };
+    }
+  } catch {
+    /* 决策面板属于展示层，取不到就当没有 */
+  }
+};
 
 // 摄像头相关变量
 const videoRef = ref<HTMLVideoElement | null>(null);
@@ -339,10 +495,12 @@ const finishInterview = async () => {
 };
 
 const sendMessage = async () => {
-  if (!userInput.value.trim() || isTyping.value) return;
+  if (interviewOver.value || !userInput.value.trim() || isTyping.value) return;
 
   const text = userInput.value;
   userInput.value = "";
+  answeredRounds.value += 1;
+  const roundNo = answeredRounds.value;
   chatList.value.push({ role: "user", content: text });
   scrollToBottom();
 
@@ -363,6 +521,16 @@ const sendMessage = async () => {
       } else if (isFetchFinished) {
         chatList.value[targetIndex].typing = false;
         isTyping.value = false;
+        // 到达轮次上限：这一句是面试官的收尾，随后自动跳到报告页
+        if (roundNo >= maxRounds.value && !interviewOver.value) {
+          interviewOver.value = true;
+          ElMessage.success(
+            `本次面试共 ${maxRounds.value} 轮，已结束，正在生成评估报告…`,
+          );
+          setTimeout(() => {
+            void finishInterview();
+          }, 1800);
+        }
         break;
       } else {
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -380,11 +548,15 @@ const sendMessage = async () => {
       body: JSON.stringify({
         interview_id: interviewId.value,
         user_message: text,
+        round_no: roundNo,
+        max_rounds: maxRounds.value,
       }),
     });
 
     if (!response.ok) throw new Error("网络请求失败");
     if (!response.body) throw new Error("浏览器不支持流式响应");
+    // 规划在流式开始前就已算完，此刻拉取即可让右栏先于提问刷新
+    void loadPlan();
     renderQueue();
 
     const reader = response.body.getReader();
@@ -500,12 +672,22 @@ onMounted(() => {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+/* 左右两栏：左对话、右决策。workspace 接管原来的 flex:1 */
+.workspace {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
 .chat-area {
   position: relative;
   z-index: 1;
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: 30px 15%;
+  padding: 30px 40px;
   display: flex;
   flex-direction: column;
   gap: 25px;
@@ -599,6 +781,239 @@ onMounted(() => {
   }
 }
 
+/* ================= 决策面板 ================= */
+.decision-panel {
+  position: relative;
+  z-index: 2;
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.55);
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(16px);
+  transition: width 0.22s ease;
+}
+.decision-panel.collapsed {
+  width: 44px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+.panel-toggle {
+  border: none;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+.panel-toggle:hover {
+  background: rgba(56, 189, 248, 0.24);
+}
+.decision-panel.collapsed .panel-head {
+  padding: 14px 0;
+  justify-content: center;
+}
+.decision-panel.collapsed .panel-title {
+  display: none;
+}
+.decision-panel.collapsed .panel-toggle {
+  writing-mode: vertical-rl;
+  padding: 10px 4px;
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.panel-empty {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #64748b;
+  padding: 8px 2px;
+}
+.decision-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.decision-key {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.65;
+}
+.d-deepen {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+.d-switch {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+  border-color: rgba(167, 139, 250, 0.28);
+}
+.d-pressure {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+.d-close {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.28);
+}
+.d-idle {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+.panel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.panel-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.panel-text {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.panel-ref {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.06);
+  border-left: 2px solid rgba(56, 189, 248, 0.5);
+}
+.ref-tag {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: #38bdf8;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+.ref-text {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #94a3b8;
+  word-break: break-word;
+}
+.tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tool-chip {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+.tool-digest {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #94a3b8;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  word-break: break-word;
+}
+.panel-foot {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 11px;
+  color: #475569;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+/* 顶栏轮次角标 */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.round-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  transition: all 0.25s;
+}
+.round-main {
+  font-size: 14px;
+  font-weight: 600;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+.round-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+.round-chip.over {
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+.round-chip.over .round-main {
+  color: #6ee7b7;
+}
+
+@media (max-width: 1200px) {
+  .decision-panel {
+    width: 300px;
+  }
+  .chat-area {
+    padding: 24px 24px;
+  }
+}
+@media (max-width: 980px) {
+  .decision-panel {
+    width: 260px;
+  }
+}
+
 /* 摄像头监考悬浮窗 */
 .camera-monitor {
   position: absolute;
@@ -617,6 +1032,23 @@ onMounted(() => {
 .camera-monitor:has(.warning) {
   border-color: #ef4444;
   box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+}
+/* 决策栏展开时给摄像头让位，避免被右栏压住 */
+.camera-monitor.shift-left {
+  right: 364px;
+}
+.camera-monitor.shift-min {
+  right: 68px;
+}
+@media (max-width: 1200px) {
+  .camera-monitor.shift-left {
+    right: 324px;
+  }
+}
+@media (max-width: 980px) {
+  .camera-monitor.shift-left {
+    right: 284px;
+  }
 }
 .camera-monitor video {
   width: 100%;

@@ -68,6 +68,10 @@ _TECH_KB = {
     "fastapi": "FastAPI 是基于 ASGI 的高性能 Python Web 框架，原生支持异步与类型注解，适合构建流式接口与 AI 服务。考察要点：依赖注入、Pydantic、SSE 流式响应、异步并发。",
     "docker": "Docker 是容器化技术，通过镜像与容器实现环境一致。考察要点：镜像分层、Dockerfile 优化、数据卷、网络模式、与 K8s 的关系。",
     "kafka": "Kafka 是高吞吐分布式消息队列。考察要点：分区与副本、生产者消费者模型、消息有序性、削峰填谷、与 RocketMQ 的区别。",
+    "chroma": "Chroma 是轻量级向量数据库，支持本地持久化。考察要点：集合与维度设计、相似度度量（cosine/l2）、Top-K 召回与元数据过滤、与 embedding 模型的配套使用。",
+    "rag": "RAG（检索增强生成）先把外部知识检索出来再交给大模型作答。考察要点：文档切分粒度、召回与重排两段式、引用溯源、召回失败时的降级策略。",
+    "sse": "SSE（Server-Sent Events）是基于 HTTP 的单向流式推送。考察要点：与 WebSocket 的区别、事件格式、断线重连、Nginx 反代需要关闭 buffering。",
+    "pydantic": "Pydantic 用类型注解做数据校验与序列化，是 FastAPI 的请求/响应模型基础。考察要点：字段校验、嵌套模型、与 ORM 的 from_attributes 映射。",
 }
 
 _SALARY_KB = {
@@ -93,6 +97,20 @@ def _lookup_salary(role: str) -> str:
         if k in key or key in k:
             return v
     return "暂无该岗位的精确薪资数据，可结合行业平均水平（应届一线城市 8k-16k/月）进行合理性判断。"
+
+
+def match_tech_concept(text: str) -> str | None:
+    """从一段文本里找出本地知识库覆盖的技术概念（命中最长的一个）。
+
+    用途：当大模型没有主动发起工具调用时，由系统按"聚焦点里出现了哪个技术词"
+    确定性地补一次考点查询。这样"工具调用"这一层不会因为模型偷懒而整轮消失，
+    演示时也能稳定看到工具记录。
+    """
+    lowered = (text or "").lower()
+    hits = [k for k in _TECH_KB if k in lowered]
+    if not hits:
+        return None
+    return max(hits, key=len)
 
 
 # ---------------------------------------------------------------------------
