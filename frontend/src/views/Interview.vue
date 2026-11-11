@@ -393,7 +393,8 @@ const initCameraAndAI = async () => {
 
     if (stream) cameraActive.value = true;
     currentStatus.value = status;
-    hasWarning.value = true;
+    // 监考未启动成功不应让状态条一直标红，只有「有警告但仍在监考」时才红
+    hasWarning.value = false;
     ElMessage.error(tip);
   }
 };
@@ -431,22 +432,35 @@ const detectFace = () => {
         );
       }
     }
-    // 情况2：检测到脸了，但偏了
+    // 情况2：检测到脸了，但可能偏了
     else {
-      const nose = results.faceLandmarks[0][1];
-      const noseX = nose.x;
+      const landmarks = results.faceLandmarks[0];
+      // 只用鼻尖 x 只反映「头在画面里的位置」，轻微转头时鼻尖几乎不动，
+      // 判断「视线离开屏幕」要看头部偏航。这里用鼻尖相对两耳外缘中点的
+      // 横向差值做近似：正对镜头时差值趋近 0，侧脸时差值随偏航角增大。
+      const nose = landmarks[1];
+      const leftEar = landmarks[234];
+      const rightEar = landmarks[454];
+      const earMidX = (leftEar.x + rightEar.x) / 2;
 
-      // 放宽到 0.2 ~ 0.8，正常坐在电脑前轻微晃动不会报警
-      if (noseX < 0.2 || noseX > 0.8) {
-        currentStatus.value = "⚠️ 视线偏离";
+      const noseX = nose.x;
+      // 判定一：头整个偏出画面中心区
+      const offCenter = noseX < 0.2 || noseX > 0.8;
+      // 判定二：头部明显转动——鼻尖与双耳中点差值超画面宽度 12%
+      const turnedAway = Math.abs(noseX - earMidX) > 0.12;
+
+      if (offCenter || turnedAway) {
+        currentStatus.value = turnedAway ? "⚠️ 视线偏离" : "⚠️ 头部偏出画面";
         hasWarning.value = true;
         if (now - lastWarningTime > 2000) {
           lookingAwayCount.value++;
           lastWarningTime = now;
           console.log(
-            "⚠️ 视线偏离屏幕！当前鼻尖X:",
+            "⚠️ 注意力偏离！鼻尖X:",
             noseX.toFixed(2),
-            "总次数:",
+            "| 鼻耳偏移:",
+            Math.abs(noseX - earMidX).toFixed(3),
+            "| 累计次数:",
             lookingAwayCount.value,
           );
         }

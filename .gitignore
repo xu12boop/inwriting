@@ -25,3 +25,7 @@ dist/
 .idea/
 .DS_Store
 *.log
+# 压测生成的临时文件
+tools/_stress_resume.docx
+tools/_stress_result.json
+tools/_stress_report_result.json
