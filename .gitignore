@@ -32,3 +32,16 @@ tools/_stress_report_result.json
 tools/_stress_journey_result.json
 _uv8002.out
 _uv8002.err
+
+# 压测脚本的运行产物（脚本本身入库，结果不入库）
+tools/stress/results/
+tools/stress/__pycache__/
+
+# 一次性诊断脚本（不随仓库分发）
+tools/_netcheck.py
+tools/_gitprobe.py
+tools/_credcheck.py
+tools/_credcheck2.py
+tools/_ghpush.py
+tools/_ghverify.py
+tools/_online_check.py
