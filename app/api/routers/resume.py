@@ -1,5 +1,6 @@
 import json
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -97,32 +98,17 @@ MATCH_AGENT_PROMPT = """
 3. gaps 要具体到能力点（如"消息队列实战"），不要写"经验不足"这类空话。
 """
 
-@router.post("/upload", response_model=ResumeResponse)
-async def upload_and_parse_resume(
-    target_job: str = Form(..., description="目标岗位"),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user) # 🔐 引入 JWT 鉴权
-):
-    filename = file.filename.lower()
-    if not (filename.endswith(".pdf") or filename.endswith(".docx")):
-        raise HTTPException(status_code=400, detail="仅支持 PDF 或 DOCX")
+def _parse_and_match(raw_text: str, target_job: str) -> tuple[dict, float, dict]:
+    """同步执行「简历解析 → RAG 检索 → 匹配打分」三段耗时逻辑。
 
-    content = await file.read()
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件过大，请上传 {settings.max_upload_mb}MB 以内的简历",
-        )
-    raw_text = extract_text_from_pdf(content) if filename.endswith(".pdf") else extract_text_from_docx(content)
-    if not raw_text.strip():
-        raise HTTPException(status_code=400, detail="无法提取到文本")
-
+    全部是阻塞调用（模型 HTTP 请求 + 向量库检索），必须放在线程池里跑，
+    不能直接写在 async 路由中，否则会独占事件循环导致同 worker 其它请求排队。
+    返回 (parsed_data, match_score, match_detail)，语义与原先内联版本完全一致。
+    """
     # 1. 解析简历
     prompt = RESUME_PARSE_PROMPT.format(resume_text=raw_text[:4000])
     ai_response = get_llm_response([{"role": "user", "content": prompt}])
-    
+
     try:
         parsed_data = loads_object(ai_response)
     except Exception:
@@ -144,7 +130,7 @@ async def upload_and_parse_resume(
         match = get_best_match_reranked(target_job, k=5)
     jd_text = match["jd"]
 
-    # 3. 计算匹配度 (Agent 计算)，并把检索引用一并注入，保证结论可溯源
+    # 3. 计算匹配度，并把检索引用一并注入，保证结论可溯源
     match_prompt = MATCH_AGENT_PROMPT.format(
         resume_json=json.dumps(parsed_data, ensure_ascii=False),
         jd_text=jd_text
@@ -170,6 +156,39 @@ async def upload_and_parse_resume(
     except Exception as e:
         print(f"⚠️ 匹配明细解析失败，仅保留分数: {e}")
         match_score = 75.0  # 兜底
+
+    return parsed_data, match_score, match_detail
+
+
+@router.post("/upload", response_model=ResumeResponse)
+async def upload_and_parse_resume(
+    target_job: str = Form(..., description="目标岗位"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user) # 🔐 引入 JWT 鉴权
+):
+    filename = file.filename.lower()
+    if not (filename.endswith(".pdf") or filename.endswith(".docx")):
+        raise HTTPException(status_code=400, detail="仅支持 PDF 或 DOCX")
+
+    content = await file.read()
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件过大，请上传 {settings.max_upload_mb}MB 以内的简历",
+        )
+    raw_text = extract_text_from_pdf(content) if filename.endswith(".pdf") else extract_text_from_docx(content)
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="无法提取到文本")
+
+    # 解析 + 检索 + 匹配三段都是同步阻塞调用（requests 打模型、Chroma 检索），
+    # 合起来 20~100 秒。本路由是 async def，若直接在此执行会独占事件循环，
+    # 同 worker 内的其它请求（含 /health、登录）全部排队——并发上传时表现为
+    # 「毫秒级接口要等上百秒」。因此整体丢进线程池，让事件循环保持可调度。
+    parsed_data, match_score, match_detail = await run_in_threadpool(
+        _parse_and_match, raw_text, target_job
+    )
 
     # 明细挂到 parsed_json 的 _match 键：复用已有 JSON 列，不新增数据库字段（免迁移）。
     # interview.py 在构造简历画像时会剔除下划线开头的键，不影响面试官提示词。

@@ -29,3 +29,6 @@ dist/
 tools/_stress_resume.docx
 tools/_stress_result.json
 tools/_stress_report_result.json
+tools/_stress_journey_result.json
+_uv8002.out
+_uv8002.err
