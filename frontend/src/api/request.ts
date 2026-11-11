@@ -5,7 +5,10 @@ import { API_BASE } from "./base"
 // 由各调用点按本地类型（见 ../types）自行断言，保持类型安全的同时避免 axios 泛型摩擦。
 const request: any = axios.create({
   baseURL: API_BASE,
-  timeout: 60000,
+  // 报告生成要等模型吐出完整 JSON，实测 40-90 秒，必须留足余量。
+  // 后端长文本调用读超时为 120 秒，这里取 150 秒，保证「后端先超时、前端后超时」，
+  // 否则前端会先断，用户看到的是无信息的「生成失败」。
+  timeout: 150000,
 })
 
 // 请求拦截器：直接从 localStorage 拿 token，避免引入 Pinia 报错

@@ -84,7 +84,9 @@ def plan_next_turn(interview_type: str, resume_json: str, history: list) -> dict
         TOOL_SCHEMAS,
         temperature=0.3,
         max_tool_rounds=1,       # 只允许一轮工具调用，控制首字延迟
-        timeout=(5, 10),         # 规划属于前置开销，超时即放弃并回退默认策略
+        # 规划是前置开销，但 10 秒过于激进：GLM-4-Flash 在负载高时单次就要 8-12 秒，
+        # 实测截图里就出现过决策栏整栏走兜底。放宽到 20 秒，仍远小于对话本身的生成时间。
+        timeout=(5, 20),
     )
 
     tool_calls = [

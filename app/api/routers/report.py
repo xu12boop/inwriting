@@ -9,6 +9,7 @@ from app.models.user import User # 🚨 引入 User
 from app.schemas.interview import ReportResponse
 from app.core.llm import get_llm_response
 from app.core.jsonutil import loads_object, loads_array
+from app.core.config import settings
 from app.api.deps import get_current_user # 🚨 引入权限校验
 
 router = APIRouter(prefix="/report", tags=["评估报告"])
@@ -46,6 +47,7 @@ def _reviews_fallback(chat_history: list) -> list[dict]:
         raw = get_llm_response(
             [{"role": "user", "content": REVIEW_PROMPT.format(chat_history=json.dumps(slim, ensure_ascii=False))}],
             temperature=0.3,
+            timeout=(settings.llm_timeout_connect, settings.llm_timeout_long),
         )
         return _normalize_reviews(loads_array(raw))
     except Exception as e:  # noqa: BLE001
@@ -110,25 +112,13 @@ JSON 结构要求：
         "抗压能力": 分数(0-100)
     }},
     "overall_score": 综合平均分(0-100),
-    "summary": "你的评语和淘汰/通过建议...",
-    "question_reviews": [
-        {{
-            "question": "面试官的原问题（超过 30 字请截断）",
-            "answer_digest": "候选人这一轮回答的要点（30 字内）",
-            "verdict": "good 或 ok 或 weak",
-            "comment": "一句话点评：好在哪、或者具体缺了什么"
-        }}
-    ],
+    "summary": "你的评语和淘汰/通过建议，150 字以内...",
     "learning_plan": [
         {{"task": "针对面试表现推荐的学习任务", "completed": false}}
     ]
 }}
 
-关于 question_reviews：
-1. 按对话顺序，为每一次「面试官提问 + 候选人回答」生成一条，最多 6 条。
-2. verdict 只能是 good / ok / weak 三者之一，不要输出其他值。
-3. comment 必须引用候选人自己说过的话或漏说的点，不要写空泛评语。
-4. 若有效问答不足 2 轮，question_reviews 输出空数组。
+只输出上面四个字段，不要额外增加字段。learning_plan 给 3-4 条，每条 20 字以内。
 
 以下是面试对话记录：
 {chat_history}
@@ -178,7 +168,11 @@ def generate_report(
         )
         messages = [{"role": "user", "content": prompt}]
         
-        ai_response = get_llm_response(messages)
+        ai_response = get_llm_response(
+            messages,
+            retries=2,
+            timeout=(settings.llm_timeout_connect, settings.llm_timeout_long),
+        )
 
         try:
             parsed_data = loads_object(ai_response)

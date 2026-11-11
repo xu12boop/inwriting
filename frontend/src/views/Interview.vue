@@ -479,16 +479,25 @@ onUnmounted(() => {
 const finishInterview = async () => {
   if (chatList.value.length <= 1)
     return ElMessage.warning("请至少回答一个问题");
+  // 自动收尾与手动点击可能同时触发，这里加锁，避免重复请求互相覆盖报告
+  if (generatingReport.value) return;
   generatingReport.value = true;
   try {
-    ElMessage.info("AI 正在复盘面试表现并生成报告...");
+    ElMessage.info("AI 正在复盘面试表现，约需 30-90 秒，请稍候…");
     await request.post(
       `/report/generate/${interviewId.value}?look_away=${lookingAwayCount.value}`,
     );
     ElMessage.success("报告生成成功！");
     router.push({ path: "/report", query: { id: interviewId.value } });
-  } catch (error) {
-    ElMessage.error("生成失败");
+  } catch (error: any) {
+    // 把真实原因显示出来：超时 / 网络中断 / 后端报错，三种处置方式完全不同
+    const isTimeout =
+      error?.code === "ECONNABORTED" || /timeout/i.test(error?.message || "");
+    const detail = isTimeout
+      ? "生成超时，模型响应过慢，请点「生成评估报告」重试"
+      : error?.response?.data?.detail || error?.message || "未知错误";
+    ElMessage.error(`报告生成失败：${detail}`);
+    console.error("[report] 生成失败", error?.response?.status, error);
   } finally {
     generatingReport.value = false;
   }

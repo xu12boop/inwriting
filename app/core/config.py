@@ -26,7 +26,11 @@ class Settings(BaseSettings):
     llm_model: str = "glm-4-flash"
     embedding_model: str = "embedding-3"
     llm_timeout_connect: float = 5.0
+    # 普通调用（简历解析、规划）的读超时
     llm_timeout_read: float = 20.0
+    # 长文本生成（评估报告）的读超时：报告要输出 5 维评分 + 逐题点评，
+    # 单次生成常需 40-80 秒，沿用 20 秒会稳定超时并触发兜底文案。
+    llm_timeout_long: float = 120.0
 
     # ---------- 业务开关与限制 ----------
     # 规划 Agent 开关：开启后每轮由规划 Agent 决策并调用工具；关闭则回退原始 Prompt 流程

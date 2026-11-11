@@ -3,9 +3,17 @@ import time
 import requests
 from app.core.config import settings
 
-def get_llm_response(messages: list, temperature: float = 0.1, retries: int = 3) -> str:
+def get_llm_response(
+    messages: list,
+    temperature: float = 0.1,
+    retries: int = 3,
+    timeout: tuple | None = None,
+) -> str:
     """
     非流式调用：用于简历解析、报告生成（需要完整 JSON 返回）
+
+    timeout 为 (连接秒, 读取秒)；不传则用默认值。生成评估报告这类长输出
+    必须显式传长超时，否则会在 20 秒处被掐断、退化为兜底文案。
     """
     url = f"{settings.llm_base_url}/chat/completions"
     headers = {
@@ -17,15 +25,15 @@ def get_llm_response(messages: list, temperature: float = 0.1, retries: int = 3)
         "messages": messages,
         "temperature": temperature
     }
-    
+    req_timeout = timeout or (settings.llm_timeout_connect, settings.llm_timeout_read)
+
     for attempt in range(retries):
         try:
-            # 连接超时5秒，读取超时20秒（可通过环境变量调整）
             response = requests.post(
                 url,
                 json=payload,
                 headers=headers,
-                timeout=(settings.llm_timeout_connect, settings.llm_timeout_read),
+                timeout=req_timeout,
             )
             
             if response.status_code == 429:
