@@ -12,7 +12,7 @@
 
         <div class="features">
           <p>⚡ 简历精准解析 · 能力雷达图</p>
-          <p>🤖 多智能体面试 · 压力面/HR面</p>
+          <p>🎥 多模态面试 · 文本对话 + 端侧视觉</p>
           <p>🧠 RAG 知识增强 · 生成式 UI</p>
         </div>
 
@@ -35,7 +35,7 @@
             <div class="news-scroll-content">
               <span>🔥 刚刚，来自北京大学的同学完成了「压力面」极限挑战。</span>
               <span>📈 平台今日已生成 1,024 份 AI 深度评估报告。</span>
-              <span>🚀 智谱 GLM-4 多智能体引擎运行正常。</span>
+              <span>🚀 智谱 GLM-4 推理引擎运行正常。</span>
             </div>
           </div>
         </div>
